@@ -74,6 +74,7 @@ JAM, KEMIRINGAN, SETELAN, and so on.
 | On SET CLOCK | Turn = change hour, click = go to minutes, turn = change minutes, click = save to the RTC. Hold = cancel |
 | On BRIGHTNESS | Turn = change (the display dims/brightens right away), click = save, hold = cancel |
 | On NIGHT MODE | Turn = choose OFF / 20 / 40 / 60%, click = save, hold = cancel |
+| On ABOUT | Click or hold = back to SETTINGS (the song stops) |
 | On G-METER | Click = back to the menu. Turn or hold = reset MAX |
 | On 4WD | Turn = move the lever (2H / 4H / 4L), click = shift. Click on the current mode or hold = back |
 | On RACE | Turn = steer. Click or hold = back to the menu |
@@ -89,7 +90,8 @@ Each screen's style depends on the theme (see **Themes** below). The flow is the
 1. **Boot** → menu. Click to skip.
 2. **Menu**: **CLOCK**, **TILT**, **G-METER**, **4WD**, **RACE**, **BATTERY** (coming soon), **SETTINGS**.
 3. **SETTINGS** → **LANGUAGE** (Indonesian / English), **THEME** (Clean / Cyberpunk / 80s / 3D),
-   **BRIGHTNESS** (20–100%, 5 levels), **NIGHT MODE**, or **SET CLOCK**. After saving, it returns to SETTINGS.
+   **BRIGHTNESS** (20–100%, 5 levels), **NIGHT MODE**, **SET CLOCK**, or **ABOUT**. After saving, it returns to SETTINGS.
+   **ABOUT** shows someone pedalling a bike, "by ikaru19", and plays a song on loop until you leave.
    Language, theme, and brightness are stored in ESP32 memory; the time is stored in the RTC.
 4. **Idle for 20 seconds** on the menu, a "coming soon" screen, or SETTINGS → switches to **CLOCK** automatically.
    The TILT screen never switches by itself, because it is used while driving.
@@ -232,7 +234,7 @@ Above 25° the number blinks as a warning.
 - Tilt warning limits: `ROLL_WARN` and `PITCH_WARN` (degrees).
 - Night mode hours: `NIGHT_START_H` and `NIGHT_END_H`. Night level options: `NIGHT_OPTIONS`.
 - G-meter scale: `G_FULL` (g at the outer ring).
-- Buzzer sounds: `SND_CLICK`, `SND_HOLD`, `SND_WARN` (list of `{tone Hz, length ms}`, tone 0 = silence).
+- Buzzer sounds: `SND_CLICK`, `SND_HOLD`, `SND_WARN`, and the ABOUT song `SND_ABOUT` (list of `{tone Hz, length ms}`, tone 0 = silence).
   Buzzer pin: `PIN_BUZZER`.
 - Jimny drawings on the tilt screen: `JIMNY_SIDE` (60×30) and `JIMNY_REAR` (40×41), one text line per
   pixel row (`#` = on). They can be edited pixel by pixel. Source: SJ410 hardtop blueprint from

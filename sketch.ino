@@ -44,7 +44,7 @@ const int PIN_SW = 5;
 const int PIN_BUZZER = 25;  // PASSIVE buzzer (can play different tones), driven through a transistor
 
 // ---------- Data types (must come before all functions so Arduino does not get confused) ----------
-enum Screen { SCR_BOOT, SCR_MENU, SCR_CLOCK, SCR_TILT, SCR_SOON, SCR_THEME, SCR_SETTINGS, SCR_LANG, SCR_SET_CLOCK, SCR_BRIGHT, SCR_GMETER, SCR_NIGHT, SCR_4WD, SCR_RACE };
+enum Screen { SCR_BOOT, SCR_MENU, SCR_CLOCK, SCR_TILT, SCR_SOON, SCR_THEME, SCR_SETTINGS, SCR_LANG, SCR_SET_CLOCK, SCR_BRIGHT, SCR_GMETER, SCR_NIGHT, SCR_4WD, SCR_RACE, SCR_ABOUT };
 enum Theme { THEME_CLEAN, THEME_CYBER, THEME_80S, THEME_3D, THEME_COUNT };
 enum ButtonEvent { BTN_NONE, BTN_CLICK, BTN_HOLD };
 enum Lang { LANG_ID, LANG_EN, LANG_COUNT };
@@ -66,7 +66,7 @@ enum TextId {
   T_SET_CLOCK, T_HOUR, T_MINUTE, T_CLICK_NEXT, T_CLICK_SAVE, T_NO_RTC,
   T_BRIGHTNESS, T_HOLD_CANCEL,
   T_GMETER, T_BRAKE, T_ACCEL, T_TURN, T_NOW, T_TILT_WARN, T_CLICK_VIEW, T_NIGHT, T_OFF,
-  T_4WD, T_ENGAGED, T_RACE, T_OFFROAD,
+  T_4WD, T_ENGAGED, T_RACE, T_OFFROAD, T_ABOUT,
   T_COUNT
 };
 
@@ -139,6 +139,7 @@ const char* const TEXTS[][LANG_COUNT] = {
   { "AKTIF", "ENGAGED" },            // T_ENGAGED
   { "BALAP", "RACE" },               // T_RACE
   { "KELUAR JALUR", "OFF ROAD" },    // T_OFFROAD
+  { "TENTANG", "ABOUT" },            // T_ABOUT
 };
 static_assert(sizeof(TEXTS) / sizeof(TEXTS[0]) == T_COUNT, "TEXTS table must have 1 row for each TextId");
 
@@ -3025,6 +3026,87 @@ void drawRace(uint32_t now) {
   }
 }
 
+// ---------- ABOUT (SETTINGS): someone pedalling a bike, "by ikaru19", and a song on loop ----------
+// Knee position for a leg from hip (hx, hy) to foot (fx, fy), thigh and shin both 'len' long, knee pointing forward
+void kneeAt(float hx, float hy, float fx, float fy, float len, float& kx, float& ky) {
+  float dx = fx - hx, dy = fy - hy, d = sqrtf(dx * dx + dy * dy);
+  d = constrain(d, 0.01f, len * 2 - 0.01f);
+  float a = d / 2, h = sqrtf(max(0.0f, len * len - a * a));
+  float mx = hx + dx * a / d, my = hy + dy * a / d;
+  kx = mx + dy * h / d;  // the side toward the front of the bike
+  ky = my - dx * h / d;
+}
+
+void drawBikeWheel(int cx, int cy, int r, float ang) {
+  circle(cx, cy, r);
+  circle(cx, cy, r - 1);
+  for (int k = 0; k < 3; k++) {  // spokes turn with the wheel
+    float a = ang + k * PI / 3;
+    line(cx - lroundf(cosf(a) * (r - 2)), cy - lroundf(sinf(a) * (r - 2)), cx + lroundf(cosf(a) * (r - 2)), cy + lroundf(sinf(a) * (r - 2)));
+  }
+}
+
+void drawAbout(uint32_t now) {
+  drawHeader(tr(T_ABOUT), "v0.4", now);
+  float t = now / 1000.0f;
+  float crank = t * TWO_PI * 1.1f;  // pedalling speed
+
+  // Ground moving past (the bike stays in the middle of the screen)
+  const int GY = 52;
+  hline(0, W - 1, GY);
+  int off = (int)(t * 40) % 10;
+  for (int x = -off; x < W; x += 10) hline(max(0, x), min(W - 1, x + 3), GY + 2);
+  int hill = (int)(t * 8) % (W + 40);  // a small hill drifting slowly in the distance
+  for (int x = 0; x < 30; x++) px(W + 10 - hill + x, GY - 6 + lroundf(fabsf(x - 15) * 0.4f));
+
+  // Bike (facing right)
+  const int RX = 46, FX = 80, WY = 45, WR = 7, CX = 61, CY = 46;
+  drawBikeWheel(RX, WY, WR, crank * 2.2f);
+  drawBikeWheel(FX, WY, WR, crank * 2.2f);
+  line(RX, WY, CX, CY);   // chainstay
+  line(RX, WY, 56, 33);   // seatstay
+  line(56, 33, CX, CY);   // seat tube
+  line(56, 33, 75, 32);   // top tube
+  line(CX, CY, 75, 33);   // down tube
+  line(75, 30, FX, WY);   // fork
+  line(75, 30, 76, 27);   // stem
+  hline(76, 79, 27);      // handlebar
+  hline(53, 58, 32);      // saddle
+  circle(CX, CY, 2);      // chainring
+
+  // Rider: bobs a little with each pedal stroke
+  float bob = sinf(crank * 2) * 0.5f;
+  float hx = 56, hy = 30 + bob, sx = 66, sy = 21 + bob;
+  line(lroundf(hx), lroundf(hy), lroundf(sx), lroundf(sy));  // back
+  disc(lroundf(sx + 3), lroundf(sy - 4), 3);                  // head
+  line(lroundf(sx), lroundf(sy), 72, lroundf(25 + bob));      // upper arm
+  line(72, lroundf(25 + bob), 77, 27);                        // forearm to the handlebar
+  for (int leg = 0; leg < 2; leg++) {
+    float a = crank + leg * PI;
+    float fx = CX + cosf(a) * 4, fy = CY + sinf(a) * 4, kx, ky;
+    kneeAt(hx, hy, fx, fy, 9, kx, ky);
+    line(lroundf(hx), lroundf(hy), lroundf(kx), lroundf(ky));
+    line(lroundf(kx), lroundf(ky), lroundf(fx), lroundf(fy));
+    hline(lroundf(fx) - 1, lroundf(fx) + 2, lroundf(fy));  // pedal
+  }
+
+  // Music notes floating up from the rider while the song plays
+  for (int n = 0; n < 3; n++) {
+    float p = fmodf(t * 0.6f + n / 3.0f, 1.0f);
+    int nx = 74 + n * 9 + lroundf(sinf((t + n) * 3) * 2), ny = 30 - lroundf(p * 16);
+    if (ny < 13) continue;
+    disc(nx, ny, 1);
+    vline(nx + 1, ny - 4, ny);
+    px(nx + 2, ny - 4);
+  }
+  if (theme == THEME_CYBER) drawCorners(30, 12, 98, 56, 4);
+
+  // Credit
+  const char* by = "by ikaru19";
+  u8g2.setFont(theme == THEME_80S ? FONT_80S : u8g2_font_helvB08_tr);
+  u8g2.drawStr(64 - u8g2.getStrWidth(by) / 2, H - 1, by);
+}
+
 // ---------- NIGHT MODE (SETTINGS) ----------
 void drawNight(uint32_t now) {
   bool saved = nightSavedAt && now - nightSavedAt < 1500;
@@ -3082,6 +3164,42 @@ const Beep SND_CLICK[] = { { 2700, 18 } };                                      
 const Beep SND_SHIFT[] = { { 180, 30 }, { 0, 70 }, { 140, 45 } };                 // 4WD lever "clunk-clunk"
 const Beep SND_HOLD[] = { { 1500, 60 } };                                         // knob hold
 const Beep SND_WARN[] = { { 3000, 150 }, { 0, 90 }, { 3000, 150 }, { 0, 500 } };  // tilt, repeated
+// ABOUT screen song, loops until you leave the screen
+const Beep SND_ABOUT[] = {
+  // { frequency (Hz), length (ms) }, { 0, gap (ms) }
+
+  // Hime hime hime
+  { 988, 380 }, { 0, 20 },  // B5, opening
+  { 784, 180 }, { 0, 20 },  // G5
+  { 880, 180 }, { 0, 20 },  // A5
+  { 784, 580 }, { 0, 20 },  // G5
+  { 880, 180 }, { 0, 20 },  // A5
+  { 784, 580 }, { 0, 20 },  // G5
+
+  // Suki suki daisuki
+  { 784, 180 }, { 0, 20 },  // G5
+  { 784, 180 }, { 0, 20 },  // G5
+  { 740, 180 }, { 0, 20 },  // F#5
+  { 784, 180 }, { 0, 20 },  // G5
+  { 880, 180 }, { 0, 20 },  // A5
+  { 988, 180 }, { 0, 20 },  // B5
+  { 880, 180 }, { 0, 20 },  // A5
+  { 784, 180 }, { 0, 20 },  // G5
+
+  // Hime hime
+  { 880, 180 }, { 0, 20 },  // A5
+  { 784, 580 }, { 0, 20 },  // G5
+  { 880, 180 }, { 0, 20 },  // A5
+  { 784, 580 }, { 0, 20 },  // G5
+
+  // Kira kirarin
+  { 880, 180 }, { 0, 20 },  // A5
+  { 784, 180 }, { 0, 20 },  // G5
+  { 740, 180 }, { 0, 20 },  // F#5
+  { 784, 180 }, { 0, 20 },  // G5
+  { 880, 180 }, { 0, 20 },  // A5
+  { 988, 380 }, { 0, 400 }, // B5, end of the phrase (longer gap before it loops)
+};
 #define SND(a) a, (int)(sizeof(a) / sizeof(a[0]))
 const Beep* sndSeq = nullptr;
 int sndLen = 0, sndIdx = 0;
@@ -3110,6 +3228,7 @@ void stopSound() {
 
 void updateSound(uint32_t now) {
   if (sndSeq == SND_WARN && !tiltWarn) stopSound();
+  if (sndSeq == SND_ABOUT && (tiltWarn || current != SCR_ABOUT)) stopSound();  // song only on ABOUT, alarm first
   if (!sndSeq && tiltWarn) playSound(SND(SND_WARN), true, now);  // alarm keeps going while tilted
   if (!sndSeq || (int32_t)(now - sndStepEnd) < 0) return;
   if (++sndIdx >= sndLen) {
@@ -3230,7 +3349,7 @@ void drawThemePicker(uint32_t now) {
 }
 
 // SETTINGS: list of settings with their current values
-const TextId SETTINGS_ITEMS[] = { T_LANGUAGE, T_THEME, T_BRIGHTNESS, T_NIGHT, T_SET_CLOCK, T_BACK };
+const TextId SETTINGS_ITEMS[] = { T_LANGUAGE, T_THEME, T_BRIGHTNESS, T_NIGHT, T_SET_CLOCK, T_ABOUT, T_BACK };
 const int SETTINGS_COUNT = sizeof(SETTINGS_ITEMS) / sizeof(SETTINGS_ITEMS[0]);
 
 void drawSettings(uint32_t now) {
@@ -3240,9 +3359,13 @@ void drawSettings(uint32_t now) {
   char pct[6];
   snprintf(pct, sizeof(pct), "%d%%", BRIGHT_PERCENT[bright]);
   char nb[6];
-  const char* values[SETTINGS_COUNT] = { LANG_NAMES[lang], themeName(theme), pct, nightText(nightOpt, nb), hm, nullptr };
+  const char* values[SETTINGS_COUNT] = { LANG_NAMES[lang], themeName(theme), pct, nightText(nightOpt, nb), hm, "v0.4", nullptr };
+  // 6 rows fit; the list scrolls once the selection goes past them
+  const int VISIBLE = (H - PICK_TOP) / PICK_ROW;
+  int scroll = constrain(settingsPick - VISIBLE + 1, 0, max(0, SETTINGS_COUNT - VISIBLE));
   for (int i = 0; i < SETTINGS_COUNT; i++) {
-    drawPickRow(0, PICK_TOP + i * PICK_ROW, W, tr(SETTINGS_ITEMS[i]), values[i], i == settingsPick, false);
+    int y = PICK_TOP + (i - scroll) * PICK_ROW;
+    if (y >= PICK_TOP && y + PICK_ROW <= H) drawPickRow(0, y, W, tr(SETTINGS_ITEMS[i]), values[i], i == settingsPick, false);
   }
 }
 
@@ -3386,6 +3509,7 @@ void drawGlitchTransition(uint32_t tt, uint32_t now) {
 
 void onEnter(Screen s, uint32_t now) {
   screenStart = now;
+  if (s == SCR_ABOUT) playSound(SND(SND_ABOUT), true, now);
   if (s == SCR_CLOCK) enterClock();
   if (s == SCR_THEME) {
     themePick = theme;
@@ -3472,6 +3596,7 @@ void drawScreen(Screen s, uint32_t now) {
     case SCR_NIGHT: drawNight(now); break;
     case SCR_4WD: draw4WD(now); break;
     case SCR_RACE: drawRace(now); break;
+    case SCR_ABOUT: drawAbout(now); break;
   }
 }
 
@@ -3508,6 +3633,9 @@ void handleInput(int steps, ButtonEvent btn, uint32_t now) {
       // Used while driving: does not switch to the clock on its own
       if (btn == BTN_CLICK) goTo(SCR_MENU);
       else if (steps || btn == BTN_HOLD) resetGMax(now);
+      break;
+    case SCR_ABOUT:
+      if (btn != BTN_NONE) goTo(SCR_SETTINGS);  // the song keeps looping until you leave
       break;
     case SCR_RACE:
       if (steps) {
@@ -3592,6 +3720,7 @@ void handleInput(int steps, ButtonEvent btn, uint32_t now) {
         else if (item == T_SET_CLOCK) goTo(SCR_SET_CLOCK);
         else if (item == T_BRIGHTNESS) goTo(SCR_BRIGHT);
         else if (item == T_NIGHT) goTo(SCR_NIGHT);
+        else if (item == T_ABOUT) goTo(SCR_ABOUT);
         else goTo(SCR_MENU);
       } else if (idle) {
         goTo(SCR_CLOCK);
