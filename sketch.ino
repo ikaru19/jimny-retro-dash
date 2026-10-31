@@ -600,7 +600,7 @@ float raceBg = 0;                  // mountain scroll (pixels)
 uint32_t raceLast = 0, raceStart = 0, raceRumbleAt = 0;
 uint8_t snapC[W * H / 8];  // screen copy for effects (zoom, slide, outline)
 Flip flipD[4] = {};        // four clock digits that can flip over (3D theme)
-Mesh meshFighter = {}, meshTitle = {}, meshItem[MENU_COUNT] = {};  // 3D models (3D theme)
+Mesh meshFighter = {}, meshItem[MENU_COUNT] = {};  // 3D models (3D theme)
 bool meshesReady = false;
 int clockHandIdx = -1;  // hand pivot point in the menu clock model
 const int STARS = 28;
@@ -640,12 +640,7 @@ uint32_t brightSavedAt = 0;
 uint32_t clockBaseSec = 0;
 RollDigit clockDigits[4];
 
-// ---------- BOOT (cyberpunk style) ----------
-const uint32_t BOOT_POWER = 700;
-const uint32_t BOOT_DECODE = 2400;
-const uint32_t BOOT_DRIVE = 3200;
-const uint32_t BOOT_HUD = 2600;
-const uint32_t BOOT_TOTAL = BOOT_POWER + BOOT_DECODE + BOOT_DRIVE + BOOT_HUD;
+// ---------- Shared effects: glitch, corner brackets ----------
 
 // Random number that is always the same for the same input (keeps the randomness controlled)
 uint32_t hash32(uint32_t x) {
@@ -655,10 +650,6 @@ uint32_t hash32(uint32_t x) {
   x *= 0x846ca68bUL;
   x ^= x >> 16;
   return x;
-}
-
-bool inWindow(uint32_t t, uint32_t start, uint32_t len) {
-  return t >= start && t < start + len;
 }
 
 // Glitch effect applied directly to screen memory.
@@ -705,320 +696,8 @@ void drawCorners(int x0, int y0, int x1, int y1, int len) {
   vline(x1, y1 - len, y1);
 }
 
-// 1. Power on: broken signal, "NO SIGNAL", then a sweeping scan line
-void drawPowerOn(uint32_t t) {
-  uint32_t seed = t / 33;
-  if (t < 480) {
-    int bars = 2 + hash32(seed) % 6;
-    for (int i = 0; i < bars; i++) {
-      uint32_t h = hash32(seed * 31 + i);
-      int y = h % H, x0 = (h >> 8) % W, len = 10 + (h >> 16) % 90;
-      hline(x0, x0 + len, y);
-      if (h & 1) hline(x0 + 6, x0 + len / 2, y + 1);
-    }
-  }
-  if (t > 180 && t < 520 && hash32(seed + 7) % 4) {
-    u8g2.setFont(u8g2_font_5x7_tr);
-    const char* s = "NO SIGNAL";
-    int w = u8g2.getStrWidth(s);
-    int x = (W - w) / 2;
-    u8g2.setDrawColor(0);
-    box(x - 5, 25, w + 10, 13);
-    u8g2.setDrawColor(1);
-    frame(x - 5, 25, w + 10, 13);
-    u8g2.drawStr(x, 34, s);
-  }
-  if (t >= 520) {
-    int y = (t - 520) * H / 180;
-    hline(0, W - 1, y);
-    for (int x = (t / 20) % 3; x < W; x += 3) px(x, y - 3);
-    for (int x = (t / 20) % 5; x < W; x += 5) px(x, y - 6);
-  }
-  if (t > 150 && t < 520) glitchFrame(0.7f, seed);
-}
-
-// 2. Code rain, then the word JIMNY is "decoded" letter by letter
-const char* HEX_CHARS = "0123456789ABCDEF";
+// Letters for the Cyberpunk menu label "decoding" effect
 const char* SCRAMBLE = "ABCDEFGHJKLMNPQRSTUVWXYZ0123456789#$%&@";
-
-void drawRain(uint32_t t) {
-  u8g2.setFont(u8g2_font_4x6_tr);
-  for (int c = 0; c < 21; c++) {
-    uint32_t hc = hash32(c * 977 + 13);
-    float speed = 45 + hc % 70;  // pixels per second
-    int len = 3 + (hc >> 8) % 5;
-    float span = H + len * 7 + 10;
-    int head = (int)fmodf(t / 1000.0f * speed + (hc >> 4) % 97, span);
-    int x = c * 6 + 1;
-    for (int k = 0; k < len; k++) {
-      int y = head - k * 7;
-      if (y < 6 || y > H + 5) continue;
-      char ch[2] = { HEX_CHARS[hash32(c * 131 + (y / 7) * 17 + t / 120) % 16], 0 };
-      if (k == 0) {
-        box(x - 1, y - 6, 6, 7);  // rain head: bright block
-        u8g2.setDrawColor(0);
-        u8g2.drawStr(x, y, ch);
-        u8g2.setDrawColor(1);
-      } else if (k < len - 1 || (t / 70) % 2) {
-        u8g2.drawStr(x, y, ch);
-      }
-    }
-  }
-}
-
-void drawDecode(uint32_t t) {
-  drawRain(t);
-  if (t < 500) return;
-  uint32_t lt = t - 500;
-
-  const char* word = "JIMNY";
-  u8g2.setFont(u8g2_font_helvB18_tr);
-  int widths[5], total = 0;
-  for (int i = 0; i < 5; i++) {
-    char c[2] = { word[i], 0 };
-    widths[i] = u8g2.getStrWidth(c);
-    total += widths[i] + (i < 4 ? 3 : 0);
-  }
-
-  // Black panel that opens in the middle of the rain
-  int pw = lroundf((total + 18) * easeOutBack(lt / 250.0f));
-  int px0 = 64 - pw / 2;
-  u8g2.setDrawColor(0);
-  box(px0, 11, pw, 30);
-  u8g2.setDrawColor(1);
-  if (pw > 12) drawCorners(px0, 11, px0 + pw - 1, 40, 4);
-
-  if (lt > 150) {
-    int x = (W - total - 6) / 2;
-    for (int i = 0; i < 5; i++) {
-      uint32_t lockAt = 300 + i * 120;
-      char c[2] = { lt >= lockAt ? word[i] : SCRAMBLE[hash32(i * 53 + lt / 45) % strlen(SCRAMBLE)], 0 };
-      drawText(x, 35, c, true, W, 0, H);
-      x += widths[i] + 3;
-    }
-  }
-
-  // Katakana ジムニー (the name Jimny in Japanese script)
-  if (lt > 1000) {
-    const char* kana = "ジムニー";  // 4 characters, 3 UTF-8 bytes each
-    u8g2.setFont(u8g2_font_b10_t_japanese1);
-    int n = min(4, (int)((lt - 1000) / 90) + 1);
-    char buf[16];
-    memcpy(buf, kana, n * 3);
-    buf[n * 3] = 0;
-    int kw = u8g2.getUTF8Width(kana);
-    int kx = (W - kw) / 2;
-    u8g2.setDrawColor(0);
-    box(kx - 3, 43, kw + 6, 13);
-    u8g2.setDrawColor(1);
-    u8g2.drawUTF8(kx, 54, buf);
-  }
-
-  if (inWindow(lt, 950, 70) || inWindow(lt, 1250, 50)) glitchFrame(0.8f, t / 30);
-}
-
-// 3. Neon city + striped sun + grid road, Jimny arrives from the horizon
-const int HORIZON = 32;
-const uint8_t CITY[][3] = {  // {x, width, height}
-  { 0, 6, 12 }, { 6, 8, 21 }, { 14, 5, 9 }, { 19, 9, 25 }, { 28, 6, 14 }, { 34, 7, 8 },
-  { 86, 7, 10 }, { 93, 6, 18 }, { 99, 10, 27 }, { 109, 5, 12 }, { 114, 8, 21 }, { 122, 6, 9 },
-};
-
-void drawSun(int cx, int cy, int r, uint32_t t) {
-  for (int dy = -r; dy <= 0; dy++) {
-    int depth = dy + r;
-    if (depth > r / 3 && (depth + (int)(t / 140)) % 5 < depth * 3 / r) continue;  // line gaps
-    int dx = (int)sqrtf((float)(r * r - dy * dy));
-    hline(cx - dx, cx + dx, cy + dy);
-  }
-}
-
-void drawCity(uint32_t t) {
-  for (int i = 0; i < 12; i++) {
-    int x = CITY[i][0], w = CITY[i][1], h = CITY[i][2];
-    int top = HORIZON - h;
-    u8g2.setDrawColor(0);
-    box(x, top, w, h);
-    u8g2.setDrawColor(1);
-    hline(x, x + w - 1, top);
-    vline(x, top, HORIZON);
-    vline(x + w - 1, top, HORIZON);
-    for (int wy = top + 3; wy < HORIZON - 1; wy += 3) {
-      for (int wx = x + 2; wx < x + w - 2; wx += 2) {
-        uint32_t flick = ((wx + wy) % 7 == 0) ? t / 600 : 0;  // some windows flicker on and off
-        if (hash32(i * 401 + wy * 13 + wx + flick) % 3 == 0) px(wx, wy);
-      }
-    }
-    if (h > 20) {
-      vline(x + w / 2, top - 4, top);  // antenna
-      if ((t / 300) % 2) px(x + w / 2, top - 5);
-    }
-  }
-}
-
-void drawGrid(uint32_t t, float speed) {
-  hline(0, W - 1, HORIZON);
-  float phase = fmodf(t / 1000.0f * speed, 1.0f);
-  for (int i = 0; i < 3; i++) {
-    float z = i + 1 - phase;  // line distance from the camera, moving closer
-    int y = HORIZON + 3 + lroundf(29.0f * powf(0.45f, z));
-    if (y < H) hline(0, W - 1, y);
-  }
-  for (int k = -7; k <= 7; k++) line(64 + k * 9, HORIZON, 64 + k * 42, H + 8);
-}
-
-// Suzuki Jimny front view: boxy body, round headlights, 5-slot grille
-const float JF_BODY[][2] = { { -1.0f, -0.22f }, { 1.0f, -0.22f }, { 1.0f, -1.02f }, { -1.0f, -1.02f } };
-const float JF_CABIN[][2] = { { -0.86f, -1.02f }, { -0.76f, -1.62f }, { 0.76f, -1.62f }, { 0.86f, -1.02f } };
-const float JF_GLASS[][2] = { { -0.68f, -1.1f }, { -0.61f, -1.52f }, { 0.61f, -1.52f }, { 0.68f, -1.1f } };
-const float JF_TIRE_L[][2] = { { -0.98f, 0.0f }, { -0.68f, 0.0f }, { -0.68f, -0.3f }, { -0.98f, -0.3f } };
-const float JF_TIRE_R[][2] = { { 0.68f, 0.0f }, { 0.98f, 0.0f }, { 0.98f, -0.3f }, { 0.68f, -0.3f } };
-const float JF_BUMPER[][2] = { { -1.07f, -0.2f }, { 1.07f, -0.2f }, { 1.07f, -0.36f }, { -1.07f, -0.36f } };
-
-void outlineShape(const Xf& t, const float (*pts)[2], int n) {
-  for (int i = 0; i < n; i++) {
-    int j = (i + 1) % n;
-    lineAt(t, pts[i][0], pts[i][1], pts[j][0], pts[j][1]);
-  }
-}
-
-// lights: 0 = off, 1 = on, >1 = big glare
-void drawJimnyFront(float cx, float gy, float s, float lights, uint32_t t) {
-  Xf T = makeXf(cx, gy, 0, s);
-  fillShape(T, JF_TIRE_L, 4);
-  fillShape(T, JF_TIRE_R, 4);
-  u8g2.setDrawColor(0);
-  fillShape(T, JF_BODY, 4);
-  fillShape(T, JF_CABIN, 4);
-  u8g2.setDrawColor(1);
-  outlineShape(T, JF_BODY, 4);
-  outlineShape(T, JF_CABIN, 4);
-  outlineShape(T, JF_GLASS, 4);
-  lineAt(T, -0.42f, -1.16f, -0.18f, -1.46f);  // glass glint
-  lineAt(T, -0.28f, -1.16f, -0.04f, -1.46f);
-  lineAt(T, -0.7f, -1.74f, 0.7f, -1.74f);  // roof rack
-  lineAt(T, -0.6f, -1.62f, -0.6f, -1.74f);
-  lineAt(T, 0.6f, -1.62f, 0.6f, -1.74f);
-  for (int k = -2; k <= 2; k++) lineAt(T, k * 0.13f, -0.86f, k * 0.13f, -0.56f);  // grille
-  fillShape(T, JF_BUMPER, 4);
-
-  for (int side = -1; side <= 1; side += 2) {
-    lineAt(T, side * 1.0f, -1.08f, side * 1.14f, -1.12f);  // mirror
-    int hx = lroundf(xfX(T, side * 0.64f, -0.7f)), hy = lroundf(xfY(T, side * 0.64f, -0.7f));
-    int r = max(1, (int)lroundf(0.2f * s));
-    if (lights > 0) disc(hx, hy, r);
-    else circle(hx, hy, r);
-    if (lights >= 1) {
-      int L = r + 2 + lroundf(lights * s / 3);
-      for (int a = 0; a < 8; a++) {
-        float ang = a * PI / 4 + t * 0.002f;
-        int len = (a % 2) ? L / 2 : L;
-        line(hx + lroundf(cosf(ang) * (r + 2)), hy + lroundf(sinf(ang) * (r + 2)),
-             hx + lroundf(cosf(ang) * len), hy + lroundf(sinf(ang) * len));
-      }
-    }
-  }
-}
-
-void drawDrive(uint32_t t) {
-  drawSun(64, HORIZON, 20, t);
-  drawCity(t);
-  drawGrid(t, 1.8f);
-
-  float p = easeOutCubic(t / 2000.0f);
-  float s = 3.0f + 18.0f * p;
-  float gy = HORIZON + 1 + 29.0f * p + ((t / 110) % 2 ? 0.0f : 0.6f * p);  // suspension bounce
-  float lights = 0;
-  if (t > 2100 && !inWindow(t, 2180, 90)) lights = 1;
-  if (inWindow(t, 2400, 300)) lights = 1.0f + 2.0f * (1.0f - (t - 2400) / 300.0f);
-
-  u8g2.setDrawColor(0);  // shadow under the car
-  box(lroundf(64 - s * 1.1f), lroundf(gy) - 1, lroundf(s * 2.2f), 3);
-  u8g2.setDrawColor(1);
-  drawJimnyFront(64, gy, s, lights, t);
-
-  // Small HUD in the corner
-  u8g2.setFont(u8g2_font_4x6_tr);
-  char spd[12];
-  snprintf(spd, sizeof(spd), "SPD %03d", (int)(120 * (1 - p)));
-  u8g2.drawStr(1, 6, spd);
-  if ((t / 250) % 2) u8g2.drawStr(W - 1 - u8g2.getStrWidth("4WD"), 6, "4WD");
-
-  if (t > 2900) glitchFrame((t - 2900) / 300.0f, t / 30);
-}
-
-// 4. Logo + HUD: frame locks on, loading, ONLINE
-void drawHud(uint32_t t) {
-  for (int y = 4; y < H; y += 8) {
-    for (int x = ((y / 8) % 2) * 4; x < W; x += 8) px(x, y);  // background grid dots
-  }
-
-  float p = easeOutCubic(t / 450.0f);
-  int x0 = lroundf(p * 12), x1 = W - 1 - lroundf(p * 12);
-  int y0 = lroundf(p * 10), y1 = H - 1 - lroundf(p * 13);
-  drawCorners(x0, y0, x1, y1, 6);
-
-  u8g2.setFont(u8g2_font_helvB18_tr);
-  int lw = u8g2.getStrWidth("JIMNY");
-  int lx = (W - lw - 6) / 2;
-  if (t > 150) {
-    int rx = lx - 2 + lroundf(easeOutCubic((t - 150) / 450.0f) * (lw + 12));
-    u8g2.setDrawColor(0);
-    box(lx - 4, 13, lw + 14, 24);
-    u8g2.setDrawColor(1);
-    drawText(lx, 34, "JIMNY", true, max(0, rx), 0, H);
-    if (rx < lx + lw + 8) vline(rx, 12, 38);  // scan line
-    // Offset shadow during glitch (stand-in for an RGB split effect)
-    if (inWindow(t, 900, 60) || inWindow(t, 1500, 50) || inWindow(t, 2100, 90)) {
-      u8g2.setDrawColor(2);
-      drawText(lx - 3, 34, "JIMNY", true, W, 0, H);
-      u8g2.setDrawColor(1);
-    }
-  }
-
-  if (t > 600) {
-    u8g2.setFont(u8g2_font_b10_t_japanese1);
-    u8g2.drawUTF8(x0 + 4, 48, "ジムニー");
-    u8g2.setFont(u8g2_font_4x6_tr);
-    const char* tag = "SUZUKI 4X4";
-    u8g2.drawStr(x1 - 3 - u8g2.getStrWidth(tag), 47, tag);
-  }
-
-  // Status + percent at the top
-  float pct = easeInOutCubic((t - min(t, (uint32_t)300)) / 2000.0f);
-  u8g2.setFont(u8g2_font_4x6_tr);
-  if (pct < 1.0f) u8g2.drawStr(1, 6, "SYS://BOOT");
-  else if ((t / 200) % 2) u8g2.drawStr(1, 6, "SYS://ONLINE");
-  char pc[8];
-  snprintf(pc, sizeof(pc), "%03d%%", (int)lroundf(pct * 100));
-  u8g2.drawStr(W - 1 - u8g2.getStrWidth(pc), 6, pc);
-
-  // Segmented loading bar
-  frame(12, 55, 104, 6);
-  int fill = lroundf(pct * 100);
-  for (int x = 14; x < 14 + fill; x += 4) box(x, 57, min(3, 14 + fill - x), 2);
-
-  if (inWindow(t, 900, 60) || inWindow(t, 2100, 90)) glitchFrame(0.5f, t / 30);
-}
-
-void drawBoot(uint32_t now) {
-  uint32_t t = now - screenStart;
-  if (t < BOOT_POWER) {
-    drawPowerOn(t);
-    return;
-  }
-  t -= BOOT_POWER;
-  if (t < BOOT_DECODE) {
-    drawDecode(t);
-    return;
-  }
-  t -= BOOT_DECODE;
-  if (t < BOOT_DRIVE) {
-    drawDrive(t);
-    return;
-  }
-  drawHud(t - BOOT_DRIVE);
-}
 
 // ---------- MAIN MENU (cyberpunk HUD style) ----------
 const uint32_t IDLE_TO_CLOCK_MS = 20000;  // idle this long in the menu = switch to the clock
@@ -1669,26 +1348,6 @@ void crtEffect(float a) {
 }
 
 // ---------- CLEAN theme: plain, easy to read at a glance while driving ----------
-const uint32_t BOOT_CLEAN_TOTAL = 2200;
-
-void drawBootClean(uint32_t t) {
-  u8g2.setFont(u8g2_font_5x7_tr);
-  const char* brand = "S U Z U K I";
-  u8g2.drawStr((W - u8g2.getStrWidth(brand)) / 2, 14, brand);
-  ditherBox(0, 6, W - 1, 15, easeInOutCubic((t - min(t, (uint32_t)400)) / 1000.0f));
-
-  // JIMNY logo fades in
-  u8g2.setFont(u8g2_font_helvB18_tr);
-  const char* logo = "JIMNY";
-  int lw = u8g2.getStrWidth(logo);
-  int lx = (W - lw) / 2;
-  u8g2.drawStr(lx, 40, logo);
-  ditherBox(lx - 1, 18, lx + lw + 1, 41, easeInOutCubic(t / 1200.0f));
-
-  // Thin line widening from the center
-  int half = lroundf(easeOutCubic((t - min(t, (uint32_t)500)) / 900.0f) * 40);
-  if (half > 0) hline(64 - half, 64 + half, 47);
-}
 
 void drawMenuClean(uint32_t now) {
   char hm[6];
@@ -1739,8 +1398,6 @@ void drawSlideTransition(uint32_t tt, uint32_t half) {
 }
 
 // ---------- 80S theme: striped sun, chrome, 7-segment, analog needle ----------
-const uint32_t BOOT80_CRT = 600, BOOT80_SUN = 1000, BOOT80_LOGO = 900, BOOT80_HOLD = 1500;
-const uint32_t BOOT80_TOTAL = BOOT80_CRT + BOOT80_SUN + BOOT80_LOGO + BOOT80_HOLD;
 
 // Sunset: upper half circle, its lower part cut by black stripes
 // that get thicker toward the horizon
@@ -1753,65 +1410,6 @@ void drawStripedSun(int cx, int cy, int r, int horizon) {
     int dx = (int)(sqrtf((float)(r * r - dy * dy)) + 0.5f);
     hline(cx - dx, cx + dx, y);
   }
-}
-
-// Grid floor moving toward the viewer
-void drawSynthGrid(int cx, int horizon, int bottom, int spread, uint32_t t) {
-  hline(0, W - 1, horizon);
-  for (int k = -8; k <= 8; k++) line(cx + k * spread / 6, horizon, cx + k * spread, bottom + 20);
-  float ph = fmodf(t / 700.0f, 1.0f);
-  for (int i = 0; i < 5; i++) {
-    float z = (i + ph) / 5.0f;
-    int y = horizon + lroundf((bottom - horizon) * z * z);
-    if (y > horizon && y <= bottom) hline(0, W - 1, y);
-  }
-}
-
-// Chrome lettering: bold italic, black line through the middle, stripes on the lower part
-void drawChrome(int x, int base, const char* s) {
-  u8g2.setFont(u8g2_font_helvB18_tr);
-  int w = u8g2.getStrWidth(s) + 8;
-  drawText(x, base, s, true, W, 0, H);
-  u8g2.setDrawColor(0);
-  int x1 = min(W - 1, x + w);
-  hline(x, x1, base - 8);
-  for (int y = base - 5; y <= base; y += 2) hline(x, x1, y);
-  u8g2.setDrawColor(1);
-}
-
-void drawBoot80(uint32_t t) {
-  const int HZ = 44;
-  float rise = easeOutCubic((t - min(t, BOOT80_CRT)) / (float)BOOT80_SUN);
-  drawStripedSun(64, HZ + lroundf((1.0f - rise) * 18), 16, HZ);
-  drawSynthGrid(64, HZ, H - 1, 26, t);
-
-  uint32_t tl = BOOT80_CRT + BOOT80_SUN - 200;
-  if (t > tl) {
-    // Chrome SUZUKI slides in from the left, then a shine sweeps across
-    u8g2.setFont(u8g2_font_helvB18_tr);
-    int w = u8g2.getStrWidth("SUZUKI") + 6;
-    float lp = easeOutBack((t - tl) / (float)BOOT80_LOGO);
-    int x = (W - w) / 2 - lroundf((1.0f - lp) * 150);
-    drawChrome(x, 25, "SUZUKI");
-    uint32_t gt = t - tl;
-    if (gt > 1000 && gt < 1500) {
-      int gx = x + (gt - 1000) * (w + 24) / 500;
-      u8g2.setDrawColor(0);
-      for (int k = 0; k < 3; k++) line(gx + k, 5, gx + k - 10, 26);
-      u8g2.setDrawColor(1);
-    }
-    // JIMNY is typed out in front of the sun
-    const char* sub = "J I M N Y";
-    int n = constrain((int)((gt - min(gt, (uint32_t)900)) / 90), 0, (int)strlen(sub));
-    char buf[12];
-    memcpy(buf, sub, n);
-    buf[n] = 0;
-    u8g2.setFont(u8g2_font_5x7_tr);
-    u8g2.setDrawColor(2);
-    u8g2.drawStr((W - u8g2.getStrWidth(sub)) / 2, 40, buf);
-    u8g2.setDrawColor(1);
-  }
-  if (t < BOOT80_CRT) crtEffect(1.0f - easeOutCubic(t / (float)BOOT80_CRT));  // TV switches on
 }
 
 void drawArrow80(int x, int cy, int dir, float bump) {
@@ -1919,7 +1517,6 @@ void drawClock80(uint32_t now) {
 }
 
 // ---------- 3D theme: drawing helpers and clock ----------
-const uint32_t BOOT3D_TOTAL = 4300;
 const uint32_t FLIP_MS = 500;  // duration of one clock digit flip
 
 bool pxAt(const uint8_t* b, int x, int y) {
@@ -2126,33 +1723,6 @@ void buildFighter(Mesh& m) {
   meshE(m, cp, r[1]);
 }
 
-// JIMNY lettering made of lines, with depth (front z=0, back z=0.3)
-void buildTitle(Mesh& m) {
-  // Each letter: lines (x0, y0, x1, y1) in a 0.8 x 1.2 box. Each letter ends with 99.
-  const float G[] = {
-    0.1f, 1.2f, 0.8f, 1.2f, 0.6f, 1.2f, 0.6f, 0.25f, 0.6f, 0.25f, 0.4f, 0, 0.4f, 0, 0.15f, 0, 0.15f, 0, 0, 0.25f, 99,  // J
-    0.1f, 1.2f, 0.7f, 1.2f, 0.4f, 1.2f, 0.4f, 0, 0.1f, 0, 0.7f, 0, 99,                                                  // I
-    0, 0, 0, 1.2f, 0, 1.2f, 0.4f, 0.55f, 0.4f, 0.55f, 0.8f, 1.2f, 0.8f, 1.2f, 0.8f, 0, 99,                              // M
-    0, 0, 0, 1.2f, 0, 1.2f, 0.8f, 0, 0.8f, 0, 0.8f, 1.2f, 99,                                                           // N
-    0, 1.2f, 0.4f, 0.6f, 0.8f, 1.2f, 0.4f, 0.6f, 0.4f, 0.6f, 0.4f, 0, 99,                                               // Y
-  };
-  int letter = 0, n = sizeof(G) / sizeof(G[0]);
-  for (int i = 0; i < n;) {
-    if (G[i] == 99) {
-      letter++;
-      i++;
-      continue;
-    }
-    float ox = letter * 1.1f - 2.6f, oy = -0.6f;
-    float x0 = G[i] + ox, y0 = G[i + 1] + oy, x1 = G[i + 2] + ox, y1 = G[i + 3] + oy;
-    meshLine(m, x0, y0, 0, x1, y1, 0);
-    meshLine(m, x0, y0, 0.3f, x1, y1, 0.3f);
-    meshLine(m, x0, y0, 0, x0, y0, 0.3f);
-    meshLine(m, x1, y1, 0, x1, y1, 0.3f);
-    i += 4;
-  }
-}
-
 // 3D model for each menu item
 void buildMenuMesh(Mesh& m, TextId item) {
   if (item == T_CLOCK) {  // desk clock: front and back rings + hands (hands are set to the current time when drawn)
@@ -2225,7 +1795,6 @@ void meshesInit() {
   if (meshesReady) return;
   meshesReady = true;
   buildFighter(meshFighter);
-  buildTitle(meshTitle);
   for (int i = 0; i < MENU_COUNT; i++) buildMenuMesh(meshItem[i], MENU[i].text);
 }
 
@@ -2286,40 +1855,6 @@ void starsDraw(float streak) {
       px(x, y);
       if (starZ[i] < 2) px(x + 1, y);  // near stars are bigger
     }
-  }
-}
-
-// Boot: drop out of hyperspace, a fighter arrives rolling, then passes over the camera,
-// then the 3D JIMNY lettering comes from afar and stands facing forward.
-void drawBoot3D(uint32_t t) {
-  meshesInit();
-  float warp = 1 - clamp01(t / 900.0f);
-  starsUpdate(millis(), 2 + warp * 40);
-  starsDraw(warp * 1.5f);
-
-  if (t > 300 && t < 2700) {
-    float p = (t - 300) / 2400.0f;
-    float e = easeOutCubic(min(1.0f, p / 0.7f));
-    float z = 40 - 36 * e, x = 0, y = -0.3f, pitch = 0;
-    if (p > 0.7f) {  // pull up, then pass over the camera
-      float q = (p - 0.7f) / 0.3f;
-      z = 4 - 3.6f * q;
-      y = -0.3f + 2.2f * q * q;
-      x = 1.2f * q;
-      pitch = 0.7f * q;
-    }
-    drawMesh(meshFighter, PI, pitch, e * TWO_PI, x, y, z, 60, 64, 32);  // nose facing the camera, rolls once
-  }
-
-  if (t > 2300) {
-    float q = easeOutCubic((t - 2300) / 1200.0f);
-    drawMesh(meshTitle, 0, -1.2f * (1 - q), 0, 0, 0.1f, 30 - 26.8f * q, 60, 64, 30);
-  }
-  if (t > 3300) {
-    u8g2.setFont(u8g2_font_6x10_tr);
-    const char* brand = "S U Z U K I";
-    u8g2.drawStr((W - u8g2.getStrWidth(brand)) / 2, 61, brand);
-    ditherBox(0, 50, W - 1, H - 1, (t - 3300) / 500.0f);
   }
 }
 
@@ -3164,6 +2699,18 @@ const Beep SND_CLICK[] = { { 2700, 18 } };                                      
 const Beep SND_SHIFT[] = { { 180, 30 }, { 0, 70 }, { 140, 45 } };                 // 4WD lever "clunk-clunk"
 const Beep SND_HOLD[] = { { 1500, 60 } };                                         // knob hold
 const Beep SND_WARN[] = { { 3000, 150 }, { 0, 90 }, { 3000, 150 }, { 0, 500 } };  // tilt, repeated
+// Boot jingle: short 80s-computer chiptune (original). A quick power-up sweep, five notes that spell
+// out J-I-M-N-Y on screen, then a bright "ta-da". About 1.5 s.
+const Beep SND_BOOT[] = {
+  // { frequency (Hz), length (ms) }, { 0, gap (ms) }
+  { 523, 40 }, { 659, 40 }, { 784, 40 }, { 1047, 40 }, { 0, 120 },  // power-up sweep C5 E5 G5 C6
+  { 784, 110 }, { 0, 30 },                                         // J  G5
+  { 1047, 110 }, { 0, 30 },                                        // I  C6
+  { 1319, 110 }, { 0, 30 },                                        // M  E6
+  { 1175, 110 }, { 0, 30 },                                        // N  D6
+  { 1319, 110 }, { 0, 70 },                                        // Y  E6
+  { 1568, 380 },                                                   // ta-da  G6
+};
 // ABOUT screen song, loops until you leave the screen
 const Beep SND_ABOUT[] = {
   // { frequency (Hz), length (ms) }, { 0, gap (ms) }
@@ -3477,14 +3024,90 @@ void burnInShift() {
   shiftScreen(SHIFT_X[k], SHIFT_Y[k]);
 }
 
-// ---------- Pick the drawing function for the theme ----------
+// ---------- Boot (same for every theme): an 80s computer starting up ----------
+// CRT warms up, POST beep, BIOS checks the real hardware (sensor, clock), then the boot jingle (SND_BOOT)
+// plays and the JIMNY logo appears with it: one letter per note, the rest on the final "ta-da". Click = skip.
+const uint32_t BOOT_JINGLE_AT = 1500;  // jingle starts after the BIOS checks
+const Beep SND_POST[] = { { 988, 160 } };  // the classic single "all OK" beep
+// Step numbers in SND_BOOT: the first letter note, and the final note
+const int BOOT_LETTER1 = 5, BOOT_FINAL = 15;
+uint32_t bootDoneAt = 0;  // when the jingle finished (0 = not yet)
+
 uint32_t bootDuration() {
-  if (theme == THEME_CLEAN) return BOOT_CLEAN_TOTAL;
-  if (theme == THEME_80S) return BOOT80_TOTAL;
-  if (theme == THEME_3D) return BOOT3D_TOTAL;
-  return BOOT_TOTAL;
+  return bootDoneAt ? bootDoneAt - screenStart + 1000 : 8000;  // a moment to see the logo, or give up after 8 s
 }
 
+void drawStr80(int x, int y, const char* s) {
+  u8g2.setFont(FONT_80S);
+  u8g2.drawStr(x, y, s);
+}
+
+// Text on the left and a result on the right of one 8-pixel row
+void bootRow(int row, const char* left, const char* right) {
+  int y = 7 + row * 8;
+  drawStr80(0, y, left);
+  if (right) drawStr80(W - 1 - u8g2.getStrWidth(right), y, right);
+}
+
+void drawBootPC(uint32_t t) {
+  static int stage = 0;
+  uint32_t now = millis();
+  if (t < 60) {
+    stage = 0;
+    bootDoneAt = 0;
+  }
+  if (stage == 0 && t >= 450) {
+    playSound(SND(SND_POST), false, now);
+    stage = 1;
+  }
+  if (stage == 1 && t >= BOOT_JINGLE_AT) {
+    playSound(SND(SND_BOOT), false, now);
+    stage = 2;
+  }
+  // How far the jingle is (step number); after it ends, past the last step
+  int step = stage < 2 ? -1 : sndSeq == SND_BOOT ? sndIdx : 99;
+  if (step == 99 && !bootDoneAt) bootDoneAt = now;
+
+  if (t < 350) {  // CRT warms up, cursor blinking on a blank screen
+    if ((t / 120) % 2) box(0, 5, 7, 2);
+    crtEffect(1.0f - easeOutCubic(t / 350.0f));
+    return;
+  }
+  if (step < 0) {  // BIOS checks
+    bootRow(0, "JIMNY BIOS v0.4", nullptr);
+    if (t >= 500) {  // memory test counting up
+      char buf[17];
+      snprintf(buf, sizeof(buf), "RAM %4dK", min(520, (int)((t - 500) * 520 / 500)));
+      bootRow(1, buf, t >= 1000 ? "OK" : nullptr);
+    }
+    if (t >= 1050) bootRow(2, "MPU6050", t >= 1200 ? (mpuOk ? "OK" : "NONE") : nullptr);
+    if (t >= 1200) bootRow(3, "RTC", t >= 1350 ? (rtcOk ? "OK" : "NONE") : nullptr);
+    return;
+  }
+
+  // Power-up sweep: raster bars rush in from the edges
+  if (step < BOOT_LETTER1) {
+    int k = step + 1;
+    for (int i = 0; i < k * 4; i++) hline(0, W - 1, 31 - k * 4 + i * 2);
+    return;
+  }
+  // Logo: one letter per note, then the rest on the final note
+  const char* LOGO = "JIMNY";
+  int letters = constrain((step - BOOT_LETTER1) / 2 + 1, 0, 5);
+  char buf[6];
+  snprintf(buf, sizeof(buf), "%.*s", letters, LOGO);
+  u8g2.setFont(u8g2_font_logisoso24_tr);
+  int lw = u8g2.getStrWidth(LOGO);
+  u8g2.drawStr(64 - lw / 2, 30, buf);
+  if (step >= BOOT_FINAL) {
+    for (int i = 0; i < 3; i++) hline(10 + i * 6, W - 11 - i * 6, 35 + i * 3);  // 80s stripes under the logo
+    u8g2.setFont(FONT_80S);
+    drawStr80(64 - u8g2.getStrWidth("RETRO DASH") / 2, 52, "RETRO DASH");
+    if (step == 99 && (now / 250) % 2) drawStr80(0, 63, "READY.");
+  }
+}
+
+// ---------- Pick the drawing function for the theme ----------
 uint32_t transHalf() {
   if (theme == THEME_CLEAN) return 170;
   if (theme == THEME_80S) return 230;
@@ -3563,10 +3186,7 @@ void drawScreen(Screen s, uint32_t now) {
   bool clean = theme == THEME_CLEAN, eighties = theme == THEME_80S, threeD = theme == THEME_3D;
   switch (s) {
     case SCR_BOOT:
-      if (clean) drawBootClean(now - screenStart);
-      else if (eighties) drawBoot80(now - screenStart);
-      else if (threeD) drawBoot3D(now - screenStart);
-      else drawBoot(now);
+      drawBootPC(now - screenStart);
       break;
     case SCR_MENU:
       menuAnimate(now);

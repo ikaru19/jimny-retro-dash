@@ -143,11 +143,15 @@ the car is safe again. Clicks during a screen transition make no sound (those cl
 ## Themes
 
 Choose in **SETTINGS**. The choice is stored in ESP32 memory (NVS), so it is remembered after the car is
-turned off. Sensor, knob, and screen flow are the same for all themes. Only the drawing style differs.
+turned off. Sensor, knob, screen flow, and the boot are the same for all themes. Only the drawing style differs.
+
+**Boot (all themes):** an 80s computer starting up. The CRT warms up, a POST beep, and the BIOS counts memory and
+checks the real sensor and clock (OK or NONE). Then a short chiptune jingle (`SND_BOOT`, ~1.5 s) plays and the screen
+follows it note by note: raster bars on the power-up sweep, one letter of JIMNY per note, then stripes,
+RETRO DASH, and READY. on the final "ta-da" (~4 s in total).
 
 | | Clean (default) | Cyberpunk | 80s | 3D |
 |---|---|---|---|---|
-| Boot | JIMNY logo fades in (~2 s) | Broken signal, code rain, neon city (~9 s) | TV turns on, striped sun rises, chrome SUZUKI (~4 s) | Drops out of hyperspace, a ship rolls in and flies past, 3D JIMNY title (~4 s) |
 | Menu | Text list + small icons | HUD carousel | Double-line box + big arrows, IBM PC font | Spinning 3D wireframe models inside a targeting reticle, flying stars, a ship passes now and then |
 | Clock | Plain big digits | Rolling digits + seconds bar | 7-segment, unlit segments shown faintly, blinking colon | Gently swaying 3D block digits, changing digits flip over, spinning cube colon |
 | Tilt | Jimny silhouette + finely shaded ground | Jimny silhouette + road-striped ground + scan line | Jimny silhouette + grid ground + 7-segment numbers | Jimny outline (vector style) + dotted ground |
@@ -228,8 +232,9 @@ Above 25° the number blinks as a warning.
   add a name to `enum TextId` and one row to `TEXTS` in the same order, then use `tr(T_NAME)`.
   English text is kept short so it fits in 128 pixels.
 - Code for each theme: search for `// ---------- CLEAN theme` and `// ---------- 80S theme`. Cyberpunk uses the
-  original functions (`drawBoot`, `drawMenu`, `drawClock`, `drawTilt`). The selector is in `drawScreen()`.
-- Boot length: Cyberpunk `BOOT_POWER` … `BOOT_HUD`, Clean `BOOT_CLEAN_TOTAL`, 80s `BOOT80_*`, 3D `BOOT3D_TOTAL`.
+  original functions (`drawMenu`, `drawClock`, `drawTilt`). The selector is in `drawScreen()`.
+- Boot: `drawBootPC()`. The jingle is `SND_BOOT`; if you change it, update the step numbers `BOOT_LETTER1`
+  (first letter note) and `BOOT_FINAL` (last note) so the screen stays in sync.
 - Glitch strength (Cyberpunk): `glitchFrame(amount, seed)`, `amount` from 0 to 1.
 - Tilt warning limits: `ROLL_WARN` and `PITCH_WARN` (degrees).
 - Night mode hours: `NIGHT_START_H` and `NIGHT_END_H`. Night level options: `NIGHT_OPTIONS`.
