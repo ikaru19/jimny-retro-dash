@@ -75,6 +75,8 @@ JAM, KEMIRINGAN, SETELAN, and so on.
 | On BRIGHTNESS | Turn = change (the display dims/brightens right away), click = save, hold = cancel |
 | On NIGHT MODE | Turn = choose OFF / 20 / 40 / 60%, click = save, hold = cancel |
 | On G-METER | Click = back to the menu. Turn or hold = reset MAX |
+| On 4WD | Turn = move the lever (2H / 4H / 4L), click = shift. Click on the current mode or hold = back |
+| On RACE | Turn = steer. Click or hold = back to the menu |
 | During the TILT! warning | Click = go straight to the TILT screen |
 
 In Wokwi: click the small arrows next to the knob to turn it, click the middle of the knob to press,
@@ -85,7 +87,7 @@ and keep the click held to "hold".
 Each screen's style depends on the theme (see **Themes** below). The flow is the same:
 
 1. **Boot** → menu. Click to skip.
-2. **Menu**: **CLOCK**, **TILT**, **G-METER**, **BATTERY** (coming soon), **SETTINGS**.
+2. **Menu**: **CLOCK**, **TILT**, **G-METER**, **4WD**, **RACE**, **BATTERY** (coming soon), **SETTINGS**.
 3. **SETTINGS** → **LANGUAGE** (Indonesian / English), **THEME** (Clean / Cyberpunk / 80s / 3D),
    **BRIGHTNESS** (20–100%, 5 levels), **NIGHT MODE**, or **SET CLOCK**. After saving, it returns to SETTINGS.
    Language, theme, and brightness are stored in ESP32 memory; the time is stored in the RTC.
@@ -119,6 +121,18 @@ so the G value can be off by ~0.05 g.
 **Night mode** (SETTINGS → NIGHT MODE): from **18:00 to 06:00** the display dims automatically to the
 chosen level (default 40%). At night, brightness is **capped** at the night level, even if BRIGHTNESS is set
 higher. Choose OFF to disable it.
+
+**4WD (just for fun):** a transfer-case lever on the left and the chassis seen from above on the right.
+Shifting to 4H or 4L gives a "clunk" shake, a low double click from the buzzer, and an "ENGAGED" banner;
+the front wheels fill in and the front driveshaft starts turning. While 4H/4L is engaged, a small badge
+shows on the clock and tilt screens. It is only a display: it is not connected to the car and resets to 2H
+at power-on.
+
+**RACE (mini game):** an endless winding road in the style of 90s racing games, with the Jimny rear view
+from the SJ410 blueprint. The goal is just to stay on the road: bends push the car outward, so keep turning
+the knob against them. On the grass the car shakes, slows down, and the buzzer rumbles. The top shows
+speed and distance. The track is `TRACK` (list of `{length, curve}`); feel: `RACE_STEER`, `RACE_PUSH`,
+`RACE_BEND`. In the Mac preview, hold ← / → to keep steering.
 
 **Buzzer:** every knob click gives a short "beep" (2700 Hz, 18 ms); holding the knob gives a lower one
 (1500 Hz, 60 ms). While the tilt warning is shown, a "beep-beep ... beep-beep" alarm keeps sounding until

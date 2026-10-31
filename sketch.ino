@@ -44,15 +44,17 @@ const int PIN_SW = 5;
 const int PIN_BUZZER = 25;  // PASSIVE buzzer (can play different tones), driven through a transistor
 
 // ---------- Data types (must come before all functions so Arduino does not get confused) ----------
-enum Screen { SCR_BOOT, SCR_MENU, SCR_CLOCK, SCR_TILT, SCR_SOON, SCR_THEME, SCR_SETTINGS, SCR_LANG, SCR_SET_CLOCK, SCR_BRIGHT, SCR_GMETER, SCR_NIGHT };
+enum Screen { SCR_BOOT, SCR_MENU, SCR_CLOCK, SCR_TILT, SCR_SOON, SCR_THEME, SCR_SETTINGS, SCR_LANG, SCR_SET_CLOCK, SCR_BRIGHT, SCR_GMETER, SCR_NIGHT, SCR_4WD, SCR_RACE };
 enum Theme { THEME_CLEAN, THEME_CYBER, THEME_80S, THEME_3D, THEME_COUNT };
 enum ButtonEvent { BTN_NONE, BTN_CLICK, BTN_HOLD };
 enum Lang { LANG_ID, LANG_EN, LANG_COUNT };
+enum DriveMode { DRIVE_2H, DRIVE_4H, DRIVE_4L, DRIVE_COUNT };  // 4WD screen (just for fun: not wired to the car)
 struct Beep { uint16_t freq; uint16_t ms; };
 struct Flip { char shown[4]; char prev[4]; uint32_t at; };  // one clock digit that can flip over (3D theme)
 struct V3 { float x, y, z; };                                // 3D point
 const int MESH_MAX_V = 64, MESH_MAX_E = 100;
 struct Mesh { V3 v[MESH_MAX_V]; uint8_t e[MESH_MAX_E][2]; uint8_t nv, ne; };  // 3D wireframe model (3D theme)
+struct TrackPart { float len, curve; };                   // one stretch of the race track (curve: + = right)
 struct Pose3 { float yaw, pitch, roll, tx, ty, tz, f, cx, cy; };              // model and camera position + orientation  // one buzzer beep: tone (Hz, 0 = silent) and its duration
 // All on-screen text that has 2 languages (contents are in the TEXTS table)
 enum TextId {
@@ -64,6 +66,7 @@ enum TextId {
   T_SET_CLOCK, T_HOUR, T_MINUTE, T_CLICK_NEXT, T_CLICK_SAVE, T_NO_RTC,
   T_BRIGHTNESS, T_HOLD_CANCEL,
   T_GMETER, T_BRAKE, T_ACCEL, T_TURN, T_NOW, T_TILT_WARN, T_CLICK_VIEW, T_NIGHT, T_OFF,
+  T_4WD, T_ENGAGED, T_RACE, T_OFFROAD,
   T_COUNT
 };
 
@@ -132,6 +135,10 @@ const char* const TEXTS[][LANG_COUNT] = {
   { "KLIK=LIHAT", "CLICK=VIEW" },    // T_CLICK_VIEW
   { "MODE MALAM", "NIGHT MODE" },    // T_NIGHT
   { "MATI", "OFF" },                 // T_OFF
+  { "4WD", "4WD" },                  // T_4WD
+  { "AKTIF", "ENGAGED" },            // T_ENGAGED
+  { "BALAP", "RACE" },               // T_RACE
+  { "KELUAR JALUR", "OFF ROAD" },    // T_OFFROAD
 };
 static_assert(sizeof(TEXTS) / sizeof(TEXTS[0]) == T_COUNT, "TEXTS table must have 1 row for each TextId");
 
@@ -530,10 +537,37 @@ void iconGear(int cx, int cy, float r, float ph, float a) {
   u8g2.setDrawColor(1);
 }
 
+void icon4WD(int cx, int cy, float r, float ph, float a) {  // tyre with tread that rolls
+  int R = lroundf(r);
+  circle(cx, cy, R);
+  if (R >= 6) circle(cx, cy, lroundf(r * 0.45f));
+  disc(cx, cy, max(1, R / 5));
+  int n = R >= 6 ? 10 : 4;
+  for (int k = 0; k < n; k++) {
+    float ang = ph * 2.0f + k * TWO_PI / n;
+    float c = cosf(ang), s = sinf(ang);
+    line(cx + lroundf(c * r * 0.7f), cy + lroundf(s * r * 0.7f), cx + lroundf(c * r), cy + lroundf(s * r));
+  }
+}
+
+void iconWheel(int cx, int cy, float r, float ph, float a) {  // steering wheel that turns left and right
+  int R = lroundf(r);
+  circle(cx, cy, R);
+  if (R >= 6) circle(cx, cy, R - 2);
+  disc(cx, cy, max(1, R / 4));
+  float turn = sinf(ph * 2.0f) * 0.6f * a;
+  for (int k = 0; k < 3; k++) {  // three spokes: left, right, down
+    float ang = turn + (k == 0 ? PI : k == 1 ? 0 : HALF_PI);
+    line(cx, cy, cx + lroundf(cosf(ang) * r), cy + lroundf(sinf(ang) * r));
+  }
+}
+
 const MenuItem MENU[] = {
   { T_CLOCK, SCR_CLOCK, iconClock },
   { T_TILT, SCR_TILT, iconTilt },
   { T_GMETER, SCR_GMETER, iconGMeter },
+  { T_4WD, SCR_4WD, icon4WD },
+  { T_RACE, SCR_RACE, iconWheel },
   { T_BATTERY, SCR_SOON, iconBattery },
   { T_SETTINGS, SCR_SETTINGS, iconGear },
 };
@@ -554,9 +588,18 @@ float arrowBumpL = 0, arrowBumpR = 0;
 uint32_t menuLastFrame = 0;
 int soonItem = 0;
 int menuSel = 0;  // currently selected menu item
+DriveMode drive = DRIVE_2H;      // engaged mode on the 4WD screen (resets to 2H at power-on)
+DriveMode driveFrom = DRIVE_2H;  // mode before the last shift
+int drivePick = 0;               // lever position chosen with the knob
+float driveLever = 0;            // drawn lever position, glides toward drivePick
+uint32_t driveShiftAt = 0;       // when the last shift started (0 = not shifting)
+float racePos = 0, raceSpeed = 0;  // race game: distance along the track and speed (track units, units/s)
+float raceX = 0, raceLean = 0;     // car position across the road (0 = middle, +-1 = edge) and steering lean
+float raceBg = 0;                  // mountain scroll (pixels)
+uint32_t raceLast = 0, raceStart = 0, raceRumbleAt = 0;
 uint8_t snapC[W * H / 8];  // screen copy for effects (zoom, slide, outline)
 Flip flipD[4] = {};        // four clock digits that can flip over (3D theme)
-Mesh meshFighter = {}, meshTitle = {}, meshItem[5] = {};         // 3D models (3D theme)
+Mesh meshFighter = {}, meshTitle = {}, meshItem[MENU_COUNT] = {};  // 3D models (3D theme)
 bool meshesReady = false;
 int clockHandIdx = -1;  // hand pivot point in the menu clock model
 const int STARS = 28;
@@ -1651,11 +1694,13 @@ void drawMenuClean(uint32_t now) {
   clockHHMM(hm);
   drawHeader("MENU", hm, now);
 
-  // Selection frame glides smoothly; at the end of the list it wraps back to the top
-  const int TOP = 13, ROW = 10;
+  // Selection frame glides smoothly; at the end of the list it wraps back to the top.
+  // 5 rows fit on screen; with more items the list scrolls to keep the selection visible.
+  const int TOP = 13, ROW = 10, ROWS = 5;
   float p = fmodf(menuPos, (float)MENU_COUNT);
   if (p < 0) p += MENU_COUNT;
-  int fy = TOP + lroundf(p * ROW);
+  float scroll = constrain(p - (ROWS - 1) / 2.0f, 0.0f, (float)max(0, MENU_COUNT - ROWS));
+  int fy = TOP + lroundf((p - scroll) * ROW);
   u8g2.setClipWindow(0, TOP, W, H);
   for (int k = 0; k < 2; k++) {
     int y = fy - k * MENU_COUNT * ROW;
@@ -1667,16 +1712,16 @@ void drawMenuClean(uint32_t now) {
     px(W - 2, y + ROW - 1);
     u8g2.setDrawColor(1);
   }
-  u8g2.setMaxClipWindow();
-
   for (int i = 0; i < MENU_COUNT; i++) {
-    int y = TOP + i * ROW;
+    int y = TOP + lroundf((i - scroll) * ROW);
+    if (y < TOP - ROW || y > H) continue;
     bool on = i == menuSel;
     MENU[i].icon(10, y + 5, 4.0f, iconPhase[i], on ? 1.0f : 0.0f);
     u8g2.setFont(on ? u8g2_font_helvB08_tr : u8g2_font_helvR08_tr);
     u8g2.drawStr(20, y + 8, tr(MENU[i].text));
     if (on) u8g2.drawStr(W - 9, y + 8, ">");
   }
+  u8g2.setMaxClipWindow();
 }
 
 void drawClockClean(uint32_t now) {
@@ -2141,6 +2186,18 @@ void buildMenuMesh(Mesh& m, TextId item) {
     meshLine(m, -0.55f, 0, -0.41f, -0.25f, 0, -0.41f);
     meshLine(m, -0.4f, -0.15f, -0.41f, -0.4f, 0.15f, -0.41f);
     meshLine(m, 0.25f, 0, -0.41f, 0.55f, 0, -0.41f);
+  } else if (item == T_4WD) {  // tyre: two sidewalls with tread across, a rim, and a hub with spokes
+    int a = meshRing(m, 12, 1.0f, 0, -0.25f), b = meshRing(m, 12, 1.0f, 0, 0.25f);
+    for (int i = 0; i < 12; i++) meshE(m, a + i, b + i);
+    int rim = meshRing(m, 12, 0.6f, 0, -0.25f), hub = meshRing(m, 6, 0.2f, 0, -0.25f);
+    for (int i = 0; i < 6; i++) meshE(m, hub + i, rim + i * 2);
+  } else if (item == T_RACE) {  // steering wheel: thick rim, hub, three spokes
+    int a = meshRing(m, 12, 1.0f, 0, -0.1f), b = meshRing(m, 12, 0.8f, 0, -0.1f);
+    for (int i = 0; i < 12; i += 3) meshE(m, a + i, b + i);
+    int hub = meshRing(m, 6, 0.25f, 0, 0.1f);
+    meshE(m, hub, b + 0);      // right spoke
+    meshE(m, hub + 3, b + 6);  // left spoke
+    meshE(m, meshV(m, 0, -0.25f, 0.1f), b + 9);  // lower spoke
   } else {  // 6-tooth gear, with depth, with a center hole
     for (int side = 0; side < 2; side++) {
       float z = side ? 0.25f : -0.25f;
@@ -2168,7 +2225,7 @@ void meshesInit() {
   meshesReady = true;
   buildFighter(meshFighter);
   buildTitle(meshTitle);
-  for (int i = 0; i < MENU_COUNT && i < 5; i++) buildMenuMesh(meshItem[i], MENU[i].text);
+  for (int i = 0; i < MENU_COUNT; i++) buildMenuMesh(meshItem[i], MENU[i].text);
 }
 
 // Rotate one point (roll, pitch, then yaw), translate it, then project it onto the screen with perspective.
@@ -2281,7 +2338,7 @@ void drawMenu3D(uint32_t now) {
   }
 
   // Clock hands follow the current time
-  for (int i = 0; i < MENU_COUNT && i < 5; i++) {
+  for (int i = 0; i < MENU_COUNT; i++) {
     if (MENU[i].text != T_CLOCK || clockHandIdx < 0) continue;
     uint32_t s = clockSeconds();
     float ah = HALF_PI - ((s / 3600) % 12 + (s / 60) % 60 / 60.0f) * TWO_PI / 12, am = HALF_PI - (s / 60) % 60 * TWO_PI / 60;
@@ -2299,6 +2356,14 @@ void drawMenu3D(uint32_t now) {
     float yaw = MENU[i].text == T_CLOCK ? sinf(spin) * 0.7f : spin;  // the clock only sways, so its hands stay visible
     float roll = MENU[i].text == T_TILT ? sinf(spin * 1.3f) * 0.4f : 0;
     float pitch = MENU[i].text == T_GMETER ? 0.55f : 0.3f;
+    if (MENU[i].text == T_4WD) {  // the tyre rolls on its axle, seen at an angle
+      yaw = 0.5f + sinf(spin * 0.5f) * 0.25f;
+      roll = -spin * 2.0f;
+    }
+    if (MENU[i].text == T_RACE) {  // the steering wheel turns left and right, facing the driver
+      yaw = sinf(spin * 0.4f) * 0.3f;
+      roll = sinf(spin * 1.5f) * 0.9f;
+    }
     drawMesh(meshItem[i], yaw, pitch, roll - d * 0.9f, d * 4.5f, 0, 3.0f + fabsf(d) * 6, 60, CX, CY);
   }
 
@@ -2450,8 +2515,13 @@ const int SIDE_W = 60, SIDE_H = 30, REAR_W = 40, REAR_H = 41;
 // Draw a text bitmap rotated by 'ang' (radians, + = clockwise on screen) around the bitmap
 // pivot point (pivX, pivY). The pivot lands on screen at (sx, sy).
 void drawBitmapRot(const char* const* rows, int bw, int bh, float pivX, float pivY, int sx, int sy, float ang) {
-  float c = cosf(ang), s = sinf(ang);
-  int r = (int)ceilf(hypotf(max(pivX, bw - pivX), max(pivY, bh - pivY))) + 1;
+  drawBitmapScaled(rows, bw, bh, pivX, pivY, sx, sy, ang, 1.0f);
+}
+
+// Same, also scaled by 'scale' (0.5 = half size)
+void drawBitmapScaled(const char* const* rows, int bw, int bh, float pivX, float pivY, int sx, int sy, float ang, float scale) {
+  float c = cosf(ang) / scale, s = sinf(ang) / scale;
+  int r = (int)ceilf(hypotf(max(pivX, bw - pivX), max(pivY, bh - pivY)) * scale) + 1;
   for (int y = -r; y <= r; y++) {
     for (int x = -r; x <= r; x++) {
       float u = x * c + y * s + pivX, v = -x * s + y * c + pivY;  // screen point rotated back into the bitmap
@@ -2591,6 +2661,7 @@ void drawTilt(uint32_t now) {
     u8g2.setDrawColor(1);
     u8g2.drawStr(64 - w / 2, 6, st);
   }
+  drawDriveBadge(W - 13, 0);
 }
 
 // ---------- G-METER ----------
@@ -2700,6 +2771,260 @@ void drawGMeter(uint32_t now) {
   drawGRow(56, T_TURN, fabsf(lat), maxTurn, showMax);
 }
 
+// ---------- 4WD (just for fun: the screen shifts, the car does not) ----------
+// Left: transfer-case lever gate. Right: chassis seen from above; driven wheels are filled
+// and driven shafts spin. Click = shift, with a "clunk" shake and a banner.
+const char* const DRIVE_NAMES[DRIVE_COUNT] = { "2H", "4H", "4L" };
+const uint32_t SHIFT_MS = 1600;  // shift animation, then back to the menu
+
+// Driveshaft from y0 to y1; a moving dash pattern when it turns
+void drawShaft(int x, int y0, int y1, bool turning, uint32_t now) {
+  if (!turning) {
+    for (int y = y0; y <= y1; y += 3) px(x, y);
+    return;
+  }
+  int off = (now / 60) % 4;
+  for (int y = y0; y <= y1; y++) {
+    if ((y + off) % 4 != 0) {
+      px(x - 1, y);
+      px(x, y);
+    }
+  }
+}
+
+// Wheel seen from above. fill 0..1 = how far the drive has reached it (fills from the axle outward)
+void drawWheel(int x, int y, float fill, bool frontAxleAbove) {
+  const int WW = 7, WH = 11;
+  frame(x, y, WW, WH);
+  int fh = lroundf(fill * (WH - 2));
+  if (fh <= 0) return;
+  box(x + 1, frontAxleAbove ? y + WH - 1 - fh : y + 1, WW - 2, fh);
+}
+
+void draw4WD(uint32_t now) {
+  drawHeader(tr(T_4WD), DRIVE_NAMES[drive], now);
+  driveLever += (drivePick - driveLever) * 0.4f;
+  uint32_t t = driveShiftAt ? now - driveShiftAt : SHIFT_MS;
+
+  // Lever gate
+  const int GX = 16, GY[DRIVE_COUNT] = { 22, 38, 54 };
+  frame(GX - 3, GY[0] - 4, 7, GY[2] - GY[0] + 9);
+  for (int i = 0; i < DRIVE_COUNT; i++) {
+    hline(GX - 6, GX - 4, GY[i]);  // notch
+    if (theme == THEME_80S) u8g2.setFont(FONT_80S);
+    else u8g2.setFont(u8g2_font_helvB08_tr);
+    int tx = GX + 9, ty = GY[i] + 4, tw = u8g2.getStrWidth(DRIVE_NAMES[i]);
+    if (i == drive) {  // engaged: inverted label
+      box(tx - 2, GY[i] - 6, tw + 4, 12);
+      u8g2.setDrawColor(0);
+      u8g2.drawStr(tx, ty, DRIVE_NAMES[i]);
+      u8g2.setDrawColor(1);
+    } else {
+      u8g2.drawStr(tx, ty, DRIVE_NAMES[i]);
+    }
+  }
+  float lp = driveLever;
+  int ly = lroundf(GY[0] + lp * (GY[1] - GY[0]));
+  u8g2.setDrawColor(0);
+  disc(GX, ly, 6);
+  u8g2.setDrawColor(1);
+  disc(GX, ly, 5);
+  u8g2.setDrawColor(0);
+  circle(GX, ly, 2);  // knob top
+  u8g2.setDrawColor(1);
+
+  // Chassis from above (front at the top). The rear wheels are always driven.
+  const int LX = 70, RX = 113, FY = 16, RY = 48, CX = 94;
+  bool was4 = driveFrom != DRIVE_2H, is4 = drive != DRIVE_2H;
+  float k = constrain(((int)t - 150) / 450.0f, 0.0f, 1.0f);  // front drive engaging/disengaging
+  float front = was4 == is4 ? (is4 ? 1 : 0) : (is4 ? easeOutCubic(k) : 1 - easeOutCubic(k));
+  hline(LX + 7, RX - 1, FY + 5);  // front axle
+  hline(LX + 7, RX - 1, RY + 5);  // rear axle
+  drawWheel(LX, FY, front, false);
+  drawWheel(RX, FY, front, false);
+  drawWheel(LX, RY, 1, true);
+  drawWheel(RX, RY, 1, true);
+  frame(CX - 5, 34, 11, 8);  // transfer case
+  if (drive == DRIVE_4L) {
+    u8g2.setFont(u8g2_font_4x6_tr);
+    u8g2.drawStr(CX + 8, 41, "LOW");
+  }
+  drawShaft(CX, FY + 6, 33, front > 0.5f, now);
+  drawShaft(CX, 42, RY + 4, true, now);
+  if (theme == THEME_CYBER) drawCorners(66, 14, W - 1, H - 1, 4);
+
+  // Shift: shake, then a banner
+  if (driveShiftAt) {
+    if (t < 220) {
+      shiftAll((t / 40) % 2 ? 2 : -2);
+      if (theme == THEME_CYBER) glitchFrame(0.35f, now / 25);
+    }
+    if (t > 450) {
+      char msg[20];
+      snprintf(msg, sizeof(msg), "%s %s", DRIVE_NAMES[drive], tr(T_ENGAGED));
+      u8g2.setFont(theme == THEME_80S ? FONT_80S : u8g2_font_helvB08_tr);
+      int w = u8g2.getStrWidth(msg) + 10;
+      int x = 64 - w / 2;
+      u8g2.setDrawColor(0);
+      box(x - 2, 24, w + 4, 18);
+      u8g2.setDrawColor(1);
+      frame(x, 26, w, 14);
+      if (theme == THEME_80S) frame(x - 2, 24, w + 4, 18);
+      u8g2.drawStr(x + 5, 37, msg);
+    }
+  }
+}
+
+// Small "4H"/"4L" tag shown on other screens while 4WD is engaged
+void drawDriveBadge(int x, int y) {
+  if (drive == DRIVE_2H) return;
+  u8g2.setFont(u8g2_font_4x6_tr);
+  int w = u8g2.getStrWidth(DRIVE_NAMES[drive]);
+  box(x, y, w + 4, 8);
+  u8g2.setDrawColor(0);
+  u8g2.drawStr(x + 2, y + 7, DRIVE_NAMES[drive]);
+  u8g2.setDrawColor(1);
+}
+
+// ---------- RACE: endless winding road, 90s racing-game style. The goal is just to keep the Jimny on the road ----------
+// Pseudo-3D: each screen row below the horizon is one distance ahead. The road center is shifted row by row
+// by the track's curve at that distance, so bends appear ahead and sweep toward the car.
+// Curves push the car outward; turn the knob to steer against it. Off the road the car shakes and slows down.
+const TrackPart TRACK[] = {
+  { 40, 0 }, { 30, 0.05f }, { 15, 0 }, { 35, -0.07f }, { 20, 0.03f }, { 25, -0.03f },
+  { 30, 0.08f }, { 20, 0 }, { 25, -0.06f }, { 30, 0.04f }, { 15, -0.08f }, { 20, 0 },
+};
+const int RACE_HOR = 22;           // horizon row
+const float RACE_ZK = 26;          // distance = RACE_ZK / rows below the horizon
+const float RACE_CAMH = 0.65f;     // camera height: road half-width in pixels = rows below horizon / RACE_CAMH
+const float RACE_VMAX = 12, RACE_VOFF = 4;  // top speed on the road and on the grass
+const float RACE_STEER = 0.1f;     // road widths per knob step
+const float RACE_PUSH = 0.6f;      // how hard curves push the car outward
+const float RACE_BEND = 1.8f;      // how much bends are exaggerated on screen
+const Beep SND_RUMBLE[] = { { 90, 40 } };  // wheels on the grass
+
+// Curve at distance d along the track, eased between stretches
+float trackCurve(float d) {
+  static float total = 0;
+  const int n = sizeof(TRACK) / sizeof(TRACK[0]);
+  if (!total)
+    for (int i = 0; i < n; i++) total += TRACK[i].len;
+  d = fmodf(d, total);
+  if (d < 0) d += total;
+  for (int i = 0; i < n; i++) {
+    if (d < TRACK[i].len) {
+      float prev = TRACK[(i + n - 1) % n].curve, t = min(1.0f, d / 8.0f);
+      return prev + (TRACK[i].curve - prev) * t * t * (3 - 2 * t);
+    }
+    d -= TRACK[i].len;
+  }
+  return 0;
+}
+
+void drawRace(uint32_t now) {
+  float dt = min(0.1f, (now - raceLast) / 1000.0f);
+  raceLast = now;
+  bool off = fabsf(raceX) > 1.05f;
+  bool started = now - raceStart > 900;  // "GO!" first
+  float vTarget = !started ? 0 : off ? RACE_VOFF : RACE_VMAX;
+  raceSpeed += (vTarget - raceSpeed) * min(1.0f, dt * (off ? 2.0f : 0.45f));
+  float c0 = trackCurve(racePos);
+  raceX = constrain(raceX - c0 * raceSpeed * RACE_PUSH * dt, -2.2f, 2.2f);
+  racePos += raceSpeed * dt;
+  raceBg += c0 * raceSpeed * dt * 30;
+  raceLean *= 0.8f;
+  if (off && raceSpeed > 2 && now - raceRumbleAt > 180) {
+    raceRumbleAt = now;
+    playSound(SND_RUMBLE, 1, false, now);
+  }
+
+  // Mountains on the horizon, scrolling sideways in bends
+  for (int x = 0; x < W; x++) {
+    float u = x + raceBg;
+    int h = 7 + lroundf(4 * sinf(u * 0.07f) + 3 * sinf(u * 0.19f + 1) + 2 * sinf(u * 0.031f));
+    px(x, RACE_HOR - h);
+    for (int y = RACE_HOR - h + 2; y < RACE_HOR; y++)
+      if (((x + y) & 3) == 0) px(x, y);
+  }
+  hline(0, W - 1, RACE_HOR);
+
+  // Road, row by row from the car toward the horizon
+  static int16_t rowX[H], rowW[H];
+  float wx = 0, dwx = 0, zPrev = RACE_ZK / (H - 1 - RACE_HOR);
+  for (int y = H - 1; y > RACE_HOR; y--) {
+    float z = RACE_ZK / (y - RACE_HOR), dz = z - zPrev, s = (y - RACE_HOR) / RACE_CAMH;
+    zPrev = z;
+    dwx += trackCurve(racePos + z) * RACE_BEND * dz;
+    wx += dwx * dz;
+    int cx = 64 + lroundf((wx - raceX) * s), hw = lroundf(s);
+    rowX[y] = cx;
+    rowW[y] = hw;
+    bool stripe = ((int)floorf((racePos + z) / 1.6f)) & 1;
+    int rumble = max(1, hw / 7), mid = hw / 45;
+    for (int x = 0; x < W; x++) {
+      int ax = abs(x - cx);
+      if (ax <= hw) {
+        if ((ax > hw - rumble || ax <= mid) && stripe) px(x, y);  // red-white kerb and the center line
+      } else if (stripe ? ((x + y) & 1) == 0 : ((x | y) & 1) == 0) {
+        px(x, y);  // grass, in light and dark bands
+      }
+    }
+  }
+
+  // Roadside posts every 4 units, with a sign on the outside of bends
+  for (int k = (int)ceilf(racePos / 4); k < racePos / 4 + 7; k++) {
+    float z = k * 4 - racePos;
+    if (z < 0.7f) continue;
+    int y = RACE_HOR + lroundf(RACE_ZK / z);
+    if (y >= H || y <= RACE_HOR) continue;
+    float s = (y - RACE_HOR) / RACE_CAMH;
+    int h = max(1, (int)lroundf(s * 0.5f));
+    float cv = trackCurve(k * 4.0f);
+    for (int side = -1; side <= 1; side += 2) {
+      int x = rowX[y] + side * lroundf(s * 1.35f);
+      vline(x, y - h, y);
+      if (cv * side < -0.02f && h >= 3) {  // outside of the bend: chevron sign
+        int sw = max(2, h / 2);
+        box(x - sw, y - h - sw, sw * 2 + 1, sw);
+      }
+    }
+  }
+
+  // The Jimny (rear view from the blueprint), black outline first so it stands out
+  int jy = H - 1 + (off && raceSpeed > 1 ? (int)((now / 50) % 2) : 0);
+  float ang = raceLean * 0.04f;
+  const float SC = 0.55f;
+  u8g2.setDrawColor(0);
+  for (int o = 0; o < 4; o++) drawBitmapScaled(JIMNY_REAR, REAR_W, REAR_H, REAR_W / 2.0f, REAR_H, 64 + (o & 1 ? 1 : -1), jy - (o & 2 ? 1 : 0), ang, SC);
+  u8g2.setDrawColor(1);
+  drawBitmapScaled(JIMNY_REAR, REAR_W, REAR_H, REAR_W / 2.0f, REAR_H, 64, jy, ang, SC);
+
+  // Speed and distance
+  char buf[16];
+  u8g2.setFont(u8g2_font_5x7_tr);
+  snprintf(buf, sizeof(buf), "%d", (int)lroundf(raceSpeed * 15));
+  u8g2.setDrawColor(0);
+  box(0, 0, 40, 8);
+  box(W - 36, 0, 36, 8);
+  u8g2.setDrawColor(1);
+  u8g2.drawStr(1, 7, buf);
+  u8g2.setFont(u8g2_font_4x6_tr);
+  u8g2.drawStr(2 + 5 * strlen(buf), 7, "km/h");
+  snprintf(buf, sizeof(buf), "%.1f km", racePos * 15 / 3600.0f);  // same scale as the km/h shown
+  u8g2.setFont(u8g2_font_5x7_tr);
+  u8g2.drawStr(W - 1 - u8g2.getStrWidth(buf), 7, buf);
+
+  const char* msg = !started ? "READY" : now - raceStart < 1500 ? "GO!" : off && (now / 250) % 2 ? tr(T_OFFROAD) : nullptr;
+  if (msg) {
+    u8g2.setFont(u8g2_font_helvB08_tr);
+    int w = u8g2.getStrWidth(msg);
+    u8g2.setDrawColor(0);
+    box(64 - w / 2 - 3, 9, w + 6, 12);
+    u8g2.setDrawColor(1);
+    u8g2.drawStr(64 - w / 2, 19, msg);
+  }
+}
+
 // ---------- NIGHT MODE (SETTINGS) ----------
 void drawNight(uint32_t now) {
   bool saved = nightSavedAt && now - nightSavedAt < 1500;
@@ -2754,6 +3079,7 @@ void updateTiltWarning(uint32_t now) {
 // Sound = list of {tone Hz, duration ms}. 2700 Hz is roughly the loudest tone of a small passive buzzer.
 // A single short beep uses tone()'s own duration (precise); sound sequences are stepped per frame (~50ms).
 const Beep SND_CLICK[] = { { 2700, 18 } };                                        // knob click
+const Beep SND_SHIFT[] = { { 180, 30 }, { 0, 70 }, { 140, 45 } };                 // 4WD lever "clunk-clunk"
 const Beep SND_HOLD[] = { { 1500, 60 } };                                         // knob hold
 const Beep SND_WARN[] = { { 3000, 150 }, { 0, 90 }, { 3000, 150 }, { 0, 500 } };  // tilt, repeated
 #define SND(a) a, (int)(sizeof(a) / sizeof(a[0]))
@@ -3084,6 +3410,16 @@ void onEnter(Screen s, uint32_t now) {
     langPick = lang;
     langSavedAt = 0;
   }
+  if (s == SCR_RACE) {
+    racePos = raceSpeed = raceX = raceLean = raceBg = 0;
+    raceLast = raceStart = now;
+  }
+  if (s == SCR_4WD) {
+    drivePick = drive;
+    driveLever = drive;
+    driveFrom = drive;
+    driveShiftAt = 0;
+  }
   if (s == SCR_MENU) {
     settingsPick = 0;
     menuLastFrame = now;
@@ -3120,6 +3456,9 @@ void drawScreen(Screen s, uint32_t now) {
       else if (eighties) drawClock80(now);
       else if (threeD) drawClock3D(now);
       else drawClock(now);
+      if (eighties) drawDriveBadge(0, 56);  // empty corners differ per theme
+      else if (theme == THEME_CYBER) drawDriveBadge(50, 0);
+      else drawDriveBadge(0, 0);
       burnInShift();
       break;
     case SCR_TILT: drawTilt(now); break;
@@ -3131,6 +3470,8 @@ void drawScreen(Screen s, uint32_t now) {
     case SCR_BRIGHT: drawBrightness(now); break;
     case SCR_GMETER: drawGMeter(now); break;
     case SCR_NIGHT: drawNight(now); break;
+    case SCR_4WD: draw4WD(now); break;
+    case SCR_RACE: drawRace(now); break;
   }
 }
 
@@ -3167,6 +3508,35 @@ void handleInput(int steps, ButtonEvent btn, uint32_t now) {
       // Used while driving: does not switch to the clock on its own
       if (btn == BTN_CLICK) goTo(SCR_MENU);
       else if (steps || btn == BTN_HOLD) resetGMax(now);
+      break;
+    case SCR_RACE:
+      if (steps) {
+        raceX += steps * RACE_STEER;
+        raceLean = constrain(raceLean + steps * 2, -6.0f, 6.0f);
+      }
+      if (btn != BTN_NONE) goTo(SCR_MENU);
+      else if (idle) goTo(SCR_CLOCK);
+      break;
+    case SCR_4WD:
+      if (driveShiftAt) {  // shifting: let the animation play, then back to the menu
+        if (now - driveShiftAt > SHIFT_MS) goTo(SCR_MENU);
+        break;
+      }
+      if (steps) drivePick = constrain(drivePick + steps, 0, DRIVE_COUNT - 1);
+      if (btn == BTN_CLICK) {
+        if (drivePick == drive) {
+          goTo(SCR_MENU);  // nothing to shift
+        } else {
+          driveFrom = drive;
+          drive = (DriveMode)drivePick;
+          driveShiftAt = now;
+          playSound(SND(SND_SHIFT), false, now);
+        }
+      } else if (btn == BTN_HOLD) {
+        goTo(SCR_MENU);
+      } else if (idle) {
+        goTo(SCR_CLOCK);
+      }
       break;
     case SCR_NIGHT:
       if (nightSavedAt) {  // already saved: show briefly, then go back
