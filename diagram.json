@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "author": "Syafrizal",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": 0, "left": 0, "attrs": {} },
+    { "type": "board-ssd1306", "id": "oled1", "top": -70, "left": 150, "attrs": { "i2cAddress": "0x3c" } },
+    { "type": "wokwi-ky-040", "id": "encoder1", "top": 70, "left": 200, "rotate": 180, "attrs": {} },
+    { "type": "wokwi-mpu6050", "id": "imu1", "top": -150, "left": 40, "attrs": {} },
+    { "type": "wokwi-ds1307", "id": "rtc1", "top": -150, "left": 230, "attrs": {} },
+    { "type": "wokwi-buzzer", "id": "bz1", "top": 150, "left": -110, "attrs": { "volume": "0.1" } }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+    [ "oled1:GND", "esp:GND.2", "black", [] ],
+    [ "oled1:VCC", "esp:3V3", "red", [] ],
+    [ "oled1:SCL", "esp:22", "green", [] ],
+    [ "oled1:SDA", "esp:21", "blue", [] ],
+    [ "encoder1:CLK", "esp:18", "orange", [] ],
+    [ "encoder1:DT", "esp:19", "yellow", [] ],
+    [ "encoder1:SW", "esp:5", "violet", [] ],
+    [ "encoder1:VCC", "esp:3V3", "red", [] ],
+    [ "encoder1:GND", "esp:GND.2", "black", [] ],
+    [ "imu1:VCC", "esp:3V3", "red", [] ],
+    [ "imu1:GND", "esp:GND.2", "black", [] ],
+    [ "imu1:SCL", "esp:22", "green", [] ],
+    [ "imu1:SDA", "esp:21", "blue", [] ],
+    [ "imu1:AD0", "esp:3V3", "red", [] ],
+    [ "rtc1:GND", "esp:GND.2", "black", [] ],
+    [ "rtc1:5V", "esp:3V3", "red", [] ],
+    [ "rtc1:SCL", "esp:22", "green", [] ],
+    [ "rtc1:SDA", "esp:21", "blue", [] ],
+    [ "bz1:2", "esp:25", "magenta", [] ],
+    [ "bz1:1", "esp:GND.1", "black", [] ]
+  ],
+  "dependencies": {}
+}
