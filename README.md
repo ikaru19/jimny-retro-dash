@@ -11,7 +11,7 @@ Tested in a Mac preview and compiled for the ESP32.
 |---|---|---|
 | **Final check in the ESP32 simulator** | `./build-esp32.sh`, then in VS Code: `Cmd+Shift+P` → **Wokwi: Start Simulator** | ~16 s |
 | **Upload to a real ESP32** | `./build-esp32.sh upload` | |
-| **Test one part at a time** | `./tes.sh 01` … `./tes.sh 05` (see [Component tests](#component-tests)) | |
+| **Test one part at a time** | `./test.sh 01` … `./test.sh 05` (see [Component tests](#component-tests)) | |
 
 Both scripts use [arduino-cli](https://arduino.github.io/arduino-cli/) with the `esp32:esp32` core and the
 `U8g2` library (`arduino-cli lib install U8g2`).
@@ -29,8 +29,8 @@ then sign in in the browser. Only once.
 | File | Contents |
 |---|---|
 | `sketch.ino` | Main code |
-| `tes/` | 5 small test programs, one per component |
-| `tes.sh` | Uploads a test and opens the Serial Monitor |
+| `tests/` | 5 small test programs, one per component |
+| `test.sh` | Uploads a test and opens the Serial Monitor |
 | `build-esp32.sh` | Compile / upload for the ESP32 |
 | `diagram.json` | Circuit for Wokwi (online and VS Code) |
 | `wokwi.toml` | Connects Wokwi for VS Code to the compiled firmware |
@@ -39,16 +39,16 @@ then sign in in the browser. Only once.
 ## Component tests
 
 Build the prototype one part at a time and test each part before adding the next.
-`./tes.sh` lists the tests; `./tes.sh 03` uploads test 03 and opens the Serial Monitor (exit with Ctrl+C).
-`./tes.sh monitor` opens only the Serial Monitor.
+`./test.sh` lists the tests; `./test.sh 03` uploads test 03 and opens the Serial Monitor (exit with Ctrl+C).
+`./test.sh monitor` opens only the Serial Monitor.
 
 | Test | Checks | Expected result |
 |---|---|---|
-| `01-kedip` | ESP32 is alive and accepts uploads | Blue LED blinks, "Halo dari ESP32!" every second |
-| `02-scan` | Devices on the I2C bus | `0x3C` = display, `0x69` = MPU-6050 (`0x68` means AD0 is not wired to 3V3) |
-| `03-layar` | Display | "HALO JIMNY", a seconds counter, and a moving dot |
+| `01-blink` | ESP32 is alive and accepts uploads | Blue LED blinks, "Hello from ESP32!" every second |
+| `02-i2c-scan` | Devices on the I2C bus | `0x3C` = display, `0x69` = MPU-6050 (`0x68` means AD0 is not wired to 3V3) |
+| `03-display` | Display | "HELLO JIMNY", a seconds counter, and a moving dot |
 | `04-knob` | KY-040 knob | Number goes up/down when turning, click counter goes up when pressing |
-| `05-miring` | MPU-6050 | Roll and pitch in degrees, plus a horizon line that stays level |
+| `05-tilt` | MPU-6050 | Roll and pitch in degrees, plus a horizon line that stays level |
 
 ## Run in Wokwi online
 
@@ -208,10 +208,10 @@ Above 25° the number blinks as a warning.
 - Default theme and language for an ESP32 that has never been set: `THEME_CLEAN` and `LANG_ID` in `loadSettings()`.
 - Brightness levels: `BRIGHT_PERCENT` (number on screen) and `BRIGHT_CONTRAST` (OLED "contrast" value 0–255).
   An OLED cannot go fully dark even at contrast 0; the dimmest level depends on the display chip.
-- All text in both languages lives in one table, `TEXTS` (search for `// ---------- Teks 2 bahasa`). New text:
+- All text in both languages lives in one table, `TEXTS` (search for `// ---------- 2-language text`). New text:
   add a name to `enum TextId` and one row to `TEXTS` in the same order, then use `tr(T_NAME)`.
   English text is kept short so it fits in 128 pixels.
-- Code for each theme: search for `// ---------- Tema CLEAN` and `// ---------- Tema 80-AN`. Cyberpunk uses the
+- Code for each theme: search for `// ---------- CLEAN theme` and `// ---------- 80S theme`. Cyberpunk uses the
   original functions (`drawBoot`, `drawMenu`, `drawClock`, `drawTilt`). The selector is in `drawScreen()`.
 - Boot length: Cyberpunk `BOOT_POWER` … `BOOT_HUD`, Clean `BOOT_CLEAN_TOTAL`, 80s `BOOT80_*`, 3D `BOOT3D_TOTAL`.
 - Glitch strength (Cyberpunk): `glitchFrame(amount, seed)`, `amount` from 0 to 1.

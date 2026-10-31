@@ -1,9 +1,9 @@
-# Hasil compile (dibuat ulang oleh build-esp32.sh, tes.sh, preview.sh)
+# Build output (recreated by build-esp32.sh, test.sh, preview.sh)
 build/
 desktop/build/
 
-# File sistem Mac
+# Mac system files
 .DS_Store
 
-# Panduan rakit (belum dipublikasikan)
+# Assembly guide (not published yet)
 panduan-rakit.html

@@ -1,5 +1,5 @@
-# Simulator Wokwi di VS Code. Compile dulu dengan ./build-esp32.sh (atau Cmd+Shift+B),
-# lalu Cmd+Shift+P → "Wokwi: Start Simulator". Rangkaian diambil dari diagram.json.
+# Wokwi simulator in VS Code. Compile first with ./build-esp32.sh (or Cmd+Shift+B),
+# then Cmd+Shift+P → "Wokwi: Start Simulator". The circuit comes from diagram.json.
 [wokwi]
 version = 1
 firmware = 'build/esp32/sketch.ino.merged.bin'
