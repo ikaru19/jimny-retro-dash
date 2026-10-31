@@ -1,290 +1,290 @@
 # Jimny Retro Dash
 
-A digital display for the Suzuki Jimny dashboard, running on an ESP32 with a 128×64 OLED.
-Version v0.4: boot animation, menu, clock, inclinometer (MPU-6050), G-meter, and buzzer feedback, with 4 themes:
-**Clean** (default), **Cyberpunk**, **80s**, and **3D**, and 2 languages: **Indonesian** (default) and **English**.
-Tested in a Mac preview and compiled for the ESP32.
+[English](README-en.md) | **한국어**
 
-## Workflow
+스즈키 지므니 대시보드용 디지털 디스플레이입니다. ESP32와 128×64 OLED로 동작합니다.
+v0.4: 부팅 애니메이션, 메뉴, 시계, 기울기계(MPU-6050), G-미터, 부저 피드백.
+테마 4종: **Clean**(기본), **Cyberpunk**, **80s**, **3D**. 언어 2종: **인도네시아어**(기본), **영어**.
+Mac 미리보기에서 테스트했고, ESP32용 컴파일도 확인했습니다.
 
-| Goal | How | Time |
+## 작업 방법
+
+| 목적 | 방법 | 시간 |
 |---|---|---|
-| **Final check in the ESP32 simulator** | `./build-esp32.sh`, then in VS Code: `Cmd+Shift+P` → **Wokwi: Start Simulator** | ~16 s |
-| **Upload to a real ESP32** | `./build-esp32.sh upload` | |
-| **Test one part at a time** | `./test.sh 01` … `./test.sh 05` (see [Component tests](#component-tests)) | |
+| **ESP32 시뮬레이터에서 최종 확인** | `./build-esp32.sh` 실행 후 VS Code에서 `Cmd+Shift+P` → **Wokwi: Start Simulator** | 약 16초 |
+| **실제 ESP32에 업로드** | `./build-esp32.sh upload` | |
+| **부품 하나씩 테스트** | `./test.sh 01` … `./test.sh 05` ([부품 테스트](#부품-테스트) 참고) | |
 
-Both scripts use [arduino-cli](https://arduino.github.io/arduino-cli/) with the `esp32:esp32` core and the
-`U8g2` library (`arduino-cli lib install U8g2`).
+두 스크립트 모두 [arduino-cli](https://arduino.github.io/arduino-cli/)와 `esp32:esp32` 코어,
+`U8g2` 라이브러리(`arduino-cli lib install U8g2`)를 사용합니다.
 
-Day to day, the design work (animations, drawings, menus) happens in a Mac preview that rebuilds and
-restarts about 2 seconds after each save of `sketch.ino`. The Mac preview (`preview.sh` and `desktop/`)
-is **not published in this repo yet**.
+평소 디자인 작업(애니메이션, 그림, 메뉴)은 Mac 미리보기에서 합니다. `sketch.ino`를 저장하면
+약 2초 뒤에 다시 빌드되고 재시작됩니다. Mac 미리보기(`preview.sh`, `desktop/`)는
+**아직 이 저장소에 공개하지 않았습니다**.
 
-### First time in Wokwi for VS Code
-Wokwi needs a free license (personal use): `Cmd+Shift+P` → **Wokwi: Request a new License**,
-then sign in in the browser. Only once.
+### Wokwi for VS Code 처음 사용할 때
+Wokwi는 무료 라이선스(개인용)가 필요합니다: `Cmd+Shift+P` → **Wokwi: Request a new License**,
+그다음 브라우저에서 로그인. 한 번만 하면 됩니다.
 
-### Files
+### 파일
 
-| File | Contents |
+| 파일 | 내용 |
 |---|---|
-| `sketch.ino` | Main code |
-| `tests/` | 5 small test programs, one per component |
-| `test.sh` | Uploads a test and opens the Serial Monitor |
-| `build-esp32.sh` | Compile / upload for the ESP32 |
-| `diagram.json` | Circuit for Wokwi (online and VS Code) |
-| `wokwi.toml` | Connects Wokwi for VS Code to the compiled firmware |
-| `libraries.txt` | Libraries for Wokwi online |
+| `sketch.ino` | 메인 코드 |
+| `tests/` | 부품별 작은 테스트 프로그램 5개 |
+| `test.sh` | 테스트를 업로드하고 시리얼 모니터를 엽니다 |
+| `build-esp32.sh` | ESP32 컴파일 / 업로드 |
+| `diagram.json` | Wokwi용 회로 (온라인, VS Code) |
+| `wokwi.toml` | Wokwi for VS Code와 컴파일된 펌웨어를 연결 |
+| `libraries.txt` | Wokwi 온라인용 라이브러리 |
+| `README-en.md` | 영어 README |
 
-## Component tests
+## 부품 테스트
 
-Build the prototype one part at a time and test each part before adding the next.
-`./test.sh` lists the tests; `./test.sh 03` uploads test 03 and opens the Serial Monitor (exit with Ctrl+C).
-`./test.sh monitor` opens only the Serial Monitor.
+프로토타입은 부품을 하나씩 연결하고, 다음 부품을 추가하기 전에 각각 테스트합니다.
+`./test.sh`는 테스트 목록을 보여 주고, `./test.sh 03`은 테스트 03을 업로드한 뒤 시리얼 모니터를 엽니다(Ctrl+C로 종료).
+`./test.sh monitor`는 시리얼 모니터만 엽니다.
 
-| Test | Checks | Expected result |
+| 테스트 | 확인 내용 | 정상 결과 |
 |---|---|---|
-| `01-blink` | ESP32 is alive and accepts uploads | Blue LED blinks, "Hello from ESP32!" every second |
-| `02-i2c-scan` | Devices on the I2C bus | `0x3C` = display, `0x69` = MPU-6050 (`0x68` means AD0 is not wired to 3V3) |
-| `03-display` | Display | "HELLO JIMNY", a seconds counter, and a moving dot |
-| `04-knob` | KY-040 knob | Number goes up/down when turning, click counter goes up when pressing |
-| `05-tilt` | MPU-6050 | Roll and pitch in degrees, plus a horizon line that stays level |
+| `01-blink` | ESP32가 살아 있고 업로드가 되는지 | 파란 LED가 깜빡이고, 1초마다 "Hello from ESP32!" |
+| `02-i2c-scan` | I2C 버스의 장치 | `0x3C` = 디스플레이, `0x69` = MPU-6050 (`0x68`이면 AD0가 3V3에 연결되지 않음) |
+| `03-display` | 디스플레이 | "HELLO JIMNY", 초 카운터, 움직이는 점 |
+| `04-knob` | KY-040 노브 | 돌리면 숫자가 오르내리고, 누르면 클릭 수가 올라감 |
+| `05-tilt` | MPU-6050 | 롤과 피치 각도(도), 그리고 수평을 유지하는 지평선 |
 
-## Run in Wokwi online
+## Wokwi 온라인에서 실행
 
-1. Open https://wokwi.com/projects/new/esp32
-2. `sketch.ino` tab: delete its contents and paste `sketch.ino` from this repo.
-3. `diagram.json` tab: delete its contents and paste `diagram.json`.
-4. **Library Manager** tab > **+** button > search `U8g2` > click it.
-5. Click the green ▶ button. Wait for the compile (the free queue can take 20–60 seconds).
+1. https://wokwi.com/projects/new/esp32 를 엽니다.
+2. `sketch.ino` 탭: 내용을 지우고 이 저장소의 `sketch.ino`를 붙여 넣습니다.
+3. `diagram.json` 탭: 내용을 지우고 `diagram.json`을 붙여 넣습니다.
+4. **Library Manager** 탭 > **+** 버튼 > `U8g2` 검색 > 클릭.
+5. 초록색 ▶ 버튼을 누릅니다. 컴파일을 기다립니다(무료 대기열은 20–60초 걸릴 수 있음).
 
-## Using the knob
+## 노브 사용법
 
-Screen names below are in English. With the default language (Indonesian) they read
-JAM, KEMIRINGAN, SETELAN, and so on.
+아래 화면 이름은 영어 기준입니다. 기본 언어(인도네시아어)에서는
+JAM, KEMIRINGAN, SETELAN 등으로 표시됩니다.
 
-| Action | Result |
+| 동작 | 결과 |
 |---|---|
-| Turn | Move through the menu. On the clock screen: back to the menu |
-| Click | Enter / back. During boot: skip the animation |
-| Hold 1 second | On the TILT screen: the current position becomes zero ("ZERO SET") |
-| Turn (on TILT) | Reset the recorded MAX angles ("MAX RESET") |
-| On SETTINGS | Turn = choose LANGUAGE / THEME / BACK, click = open |
-| On LANGUAGE or THEME | Turn = choose (themes show a small preview), click = save. Text/style changes right away. Choose BACK to cancel |
-| On SET CLOCK | Turn = change hour, click = go to minutes, turn = change minutes, click = save to the RTC. Hold = cancel |
-| On BRIGHTNESS | Turn = change (the display dims/brightens right away), click = save, hold = cancel |
-| On NIGHT MODE | Turn = choose OFF / 20 / 40 / 60%, click = save, hold = cancel |
-| On ABOUT | Click or hold = back to SETTINGS (the song stops) |
-| On G-METER | Click = back to the menu. Turn or hold = reset MAX |
-| On 4WD | Turn = move the lever (2H / 4H / 4L), click = shift. Click on the current mode or hold = back |
-| On RACE | Turn = steer. Click or hold = back to the menu |
-| During the TILT! warning | Click = go straight to the TILT screen |
+| 돌리기 | 메뉴 이동. 시계 화면에서는 메뉴로 돌아감 |
+| 클릭 | 들어가기 / 돌아가기. 부팅 중에는 애니메이션 건너뛰기 |
+| 1초 누르고 있기 | TILT 화면: 현재 자세를 0으로 설정("ZERO SET") |
+| 돌리기 (TILT 화면) | 기록된 MAX 각도 초기화("MAX RESET") |
+| SETTINGS 화면 | 돌리기 = LANGUAGE / THEME / BACK 선택, 클릭 = 열기 |
+| LANGUAGE 또는 THEME 화면 | 돌리기 = 선택(테마는 작은 미리보기가 보임), 클릭 = 저장. 글자/스타일이 바로 바뀜. BACK을 고르면 취소 |
+| SET CLOCK 화면 | 돌리기 = 시 변경, 클릭 = 분으로 이동, 돌리기 = 분 변경, 클릭 = RTC에 저장. 누르고 있기 = 취소 |
+| BRIGHTNESS 화면 | 돌리기 = 변경(화면 밝기가 바로 바뀜), 클릭 = 저장, 누르고 있기 = 취소 |
+| NIGHT MODE 화면 | 돌리기 = OFF / 20 / 40 / 60% 선택, 클릭 = 저장, 누르고 있기 = 취소 |
+| ABOUT 화면 | 클릭 또는 누르고 있기 = SETTINGS로 돌아감(노래가 멈춤) |
+| G-METER 화면 | 클릭 = 메뉴로. 돌리기 또는 누르고 있기 = MAX 초기화 |
+| 4WD 화면 | 돌리기 = 레버 이동(2H / 4H / 4L), 클릭 = 변속. 현재 모드에서 클릭 또는 누르고 있기 = 돌아감 |
+| RACE 화면 | 돌리기 = 조향. 클릭 또는 누르고 있기 = 메뉴로 |
+| TILT! 경고 중 | 클릭 = 바로 TILT 화면으로 |
 
-In Wokwi: click the small arrows next to the knob to turn it, click the middle of the knob to press,
-and keep the click held to "hold".
+Wokwi에서는: 노브 옆의 작은 화살표를 클릭하면 돌리기, 노브 가운데를 클릭하면 누르기,
+클릭을 계속 누르고 있으면 "누르고 있기"입니다.
 
-## Screen flow
+## 화면 흐름
 
-Each screen's style depends on the theme (see **Themes** below). The flow is the same:
+각 화면의 스타일은 테마에 따라 다릅니다(아래 **테마** 참고). 흐름은 같습니다:
 
-1. **Boot** → menu. Click to skip.
-2. **Menu**: **CLOCK**, **TILT**, **G-METER**, **4WD**, **RACE**, **BATTERY** (coming soon), **SETTINGS**.
-3. **SETTINGS** → **LANGUAGE** (Indonesian / English), **THEME** (Clean / Cyberpunk / 80s / 3D),
-   **BRIGHTNESS** (20–100%, 5 levels), **NIGHT MODE**, **SET CLOCK**, or **ABOUT**. After saving, it returns to SETTINGS.
-   **ABOUT** shows someone pedalling a bike, "by ikaru19", and plays a song on loop until you leave.
-   Language, theme, and brightness are stored in ESP32 memory; the time is stored in the RTC.
-4. **Idle for 20 seconds** on the menu, a "coming soon" screen, or SETTINGS → switches to **CLOCK** automatically.
-   The TILT screen never switches by itself, because it is used while driving.
-5. **CLOCK**: big clock. Turn or click to go back to the menu.
-6. **TILT**: like a factory inclinometer. Left = **side view** (PITCH, front of the car facing left),
-   right = **rear view** (ROLL). The Jimny silhouette is taken straight from an SJ410 hardtop blueprint
-   (same body as the JA11) and rotated to the angle, on top of ground that tilts with it.
-   Big numbers sit at the bottom right of each panel. The solid ground line = the ground under the car,
-   the dotted line = a level floor for reference. ROLL and PITCH numbers stay big so they read at a glance;
-   above 25° they blink. **MAX** = the largest angle since the last reset.
-   Real data comes from the MPU-6050 (**LIVE** tag); without the sensor it shows moving sample data (**DEMO**).
-   ROLL + = right side down, PITCH + = uphill.
+1. **부팅** → 메뉴. 클릭하면 건너뜁니다.
+2. **메뉴**: **CLOCK**, **TILT**, **G-METER**, **4WD**, **RACE**, **BATTERY**(준비 중), **SETTINGS**.
+3. **SETTINGS** → **LANGUAGE**(인도네시아어 / 영어), **THEME**(Clean / Cyberpunk / 80s / 3D),
+   **BRIGHTNESS**(20–100%, 5단계), **NIGHT MODE**, **SET CLOCK**, **ABOUT**. 저장하면 SETTINGS로 돌아갑니다.
+   **ABOUT**에서는 자전거 페달을 밟는 사람과 "by ikaru19"가 나오고, 화면을 나갈 때까지 노래가 반복 재생됩니다.
+   언어, 테마, 밝기는 ESP32 메모리에, 시간은 RTC에 저장됩니다.
+4. 메뉴, "준비 중" 화면, SETTINGS에서 **20초 동안 조작이 없으면** 자동으로 **CLOCK**으로 바뀝니다.
+   TILT 화면은 운전 중에 쓰기 때문에 스스로 바뀌지 않습니다.
+5. **CLOCK**: 큰 시계. 돌리거나 클릭하면 메뉴로 돌아갑니다.
+6. **TILT**: 순정 기울기계와 비슷합니다. 왼쪽 = **옆모습**(PITCH, 차 앞쪽이 왼쪽),
+   오른쪽 = **뒷모습**(ROLL). 지므니 실루엣은 SJ410 하드탑 도면(JA11과 같은 차체)에서 그대로 가져와
+   각도에 맞게 회전하며, 함께 기울어지는 지면 위에 그려집니다.
+   큰 숫자는 각 패널의 오른쪽 아래에 있습니다. 실선 = 차 아래의 지면,
+   점선 = 기준이 되는 수평 바닥. ROLL과 PITCH 숫자는 한눈에 읽히도록 크게 유지되며,
+   25°를 넘으면 깜빡입니다. **MAX** = 마지막 초기화 이후 가장 큰 각도.
+   실제 데이터는 MPU-6050에서 옵니다(**LIVE** 표시). 센서가 없으면 움직이는 예시 데이터를 보여 줍니다(**DEMO**).
+   ROLL + = 오른쪽이 내려감, PITCH + = 오르막.
 
-## Tilt warning, G-meter, night mode
+## 기울기 경고, G-미터, 야간 모드
 
-**Tilt warning:** if the car tilts more than **30° (roll)** or **35° (pitch)**, a big **TILT!** warning
-appears on any screen (blinking, with hazard stripes) plus the worst angle.
-Click to go straight to the TILT screen; on that screen the warning is a blinking frame.
-The warning clears once the angle stays 3° below the limit for 1 second (so it does not flicker at the
-limit). It is only active when the sensor is connected and the gyro is calibrated.
+**기울기 경고:** 차가 **30°(롤)** 또는 **35°(피치)** 이상 기울면, 어떤 화면에서든 큰 **TILT!** 경고가
+(깜빡이는 위험 줄무늬와 함께) 가장 심한 각도와 같이 나타납니다.
+클릭하면 바로 TILT 화면으로 갑니다. TILT 화면에서는 경고가 깜빡이는 테두리로 표시됩니다.
+각도가 한계보다 3° 낮은 상태로 1초 유지되면 경고가 사라집니다(한계 근처에서 깜빡거리지 않도록).
+센서가 연결되어 있고 자이로 보정이 끝났을 때만 동작합니다.
 
-**G-meter** (G-METER menu): a dot moves like a ball in a bowl. Braking = dot moves up, accelerating = down,
-turning left = right, turning right = left. Outer ring 0.8 g, inner ring 0.4 g. The table on the right
-shows the current value and MAX for braking, accelerating, and turning. It is computed from the
-accelerometer minus gravity (using the car's angle from the tilt sensor), then smoothed so engine
-vibration does not get in the way. Note: long braking or accelerating can shift the angle slightly,
-so the G value can be off by ~0.05 g.
+**G-미터** (G-METER 메뉴): 점이 그릇 속 공처럼 움직입니다. 제동 = 점이 위로, 가속 = 아래로,
+좌회전 = 오른쪽으로, 우회전 = 왼쪽으로. 바깥 원 0.8 g, 안쪽 원 0.4 g. 오른쪽 표는
+제동, 가속, 선회의 현재 값과 MAX를 보여 줍니다. 가속도계 값에서 중력을 빼서 계산하고
+(기울기 센서의 차 각도 사용), 엔진 진동이 방해하지 않도록 부드럽게 만듭니다.
+참고: 오래 제동하거나 가속하면 각도가 조금 밀릴 수 있어서 G 값이 약 0.05 g 틀릴 수 있습니다.
 
-**Night mode** (SETTINGS → NIGHT MODE): from **18:00 to 06:00** the display dims automatically to the
-chosen level (default 40%). At night, brightness is **capped** at the night level, even if BRIGHTNESS is set
-higher. Choose OFF to disable it.
+**야간 모드** (SETTINGS → NIGHT MODE): **18:00–06:00**에는 화면이 고른 단계로 자동으로 어두워집니다
+(기본 40%). 밤에는 BRIGHTNESS를 더 밝게 설정해도 밝기가 야간 단계로 **제한**됩니다.
+OFF를 고르면 꺼집니다.
 
-**4WD (just for fun):** a transfer-case lever on the left and the chassis seen from above on the right.
-Shifting to 4H or 4L gives a "clunk" shake, a low double click from the buzzer, and an "ENGAGED" banner;
-the front wheels fill in and the front driveshaft starts turning. While 4H/4L is engaged, a small badge
-shows on the clock and tilt screens. It is only a display: it is not connected to the car and resets to 2H
-at power-on.
+**4WD (재미용):** 왼쪽에는 트랜스퍼 레버, 오른쪽에는 위에서 본 섀시가 있습니다.
+4H나 4L로 변속하면 "덜컹" 흔들림, 부저의 낮은 두 번 클릭, "ENGAGED" 배너가 나옵니다.
+앞바퀴가 채워지고 앞 드라이브샤프트가 돌기 시작합니다. 4H/4L 상태에서는 시계와 기울기 화면에
+작은 표시가 나타납니다. 화면 표시일 뿐이며 차와 연결되지 않고, 전원을 켜면 2H로 돌아갑니다.
 
-**RACE (mini game):** an endless winding road in the style of 90s racing games, with the Jimny rear view
-from the SJ410 blueprint. The goal is just to stay on the road: bends push the car outward, so keep turning
-the knob against them. On the grass the car shakes, slows down, and the buzzer rumbles. The top shows
-speed and distance. The track is `TRACK` (list of `{length, curve}`); feel: `RACE_STEER`, `RACE_PUSH`,
-`RACE_BEND`. In the Mac preview, hold ← / → to keep steering.
+**RACE (미니게임):** 90년대 레이싱 게임 스타일의 끝없이 굽은 도로를, SJ410 도면에서 가져온
+지므니 뒷모습으로 달립니다. 목표는 도로를 벗어나지 않는 것뿐입니다. 커브가 차를 바깥으로 밀어내므로
+반대 방향으로 노브를 계속 돌려야 합니다. 풀밭으로 나가면 차가 흔들리고 느려지며 부저가 웅웅거립니다.
+위쪽에 속도와 거리가 표시됩니다. 코스는 `TRACK`(`{길이, 커브}` 목록), 조작감은 `RACE_STEER`, `RACE_PUSH`,
+`RACE_BEND`. Mac 미리보기에서는 ← / →를 누르고 있으면 계속 조향합니다.
 
-**Buzzer:** every knob click gives a short "beep" (2700 Hz, 18 ms); holding the knob gives a lower one
-(1500 Hz, 60 ms). While the tilt warning is shown, a "beep-beep ... beep-beep" alarm keeps sounding until
-the car is safe again. Clicks during a screen transition make no sound (those clicks are ignored).
+**부저:** 노브를 클릭할 때마다 짧은 "삑"(2700 Hz, 18 ms), 누르고 있으면 더 낮은 소리
+(1500 Hz, 60 ms). 기울기 경고가 떠 있는 동안에는 차가 다시 안전해질 때까지 "삑삑 ... 삑삑" 경보가 계속 울립니다.
+화면 전환 중의 클릭은 소리가 나지 않습니다(그 클릭은 무시됨).
 
-## Themes
+## 테마
 
-Choose in **SETTINGS**. The choice is stored in ESP32 memory (NVS), so it is remembered after the car is
-turned off. Sensor, knob, screen flow, and the boot are the same for all themes. Only the drawing style differs.
+**SETTINGS**에서 고릅니다. 선택은 ESP32 메모리(NVS)에 저장되므로 시동을 꺼도 기억됩니다.
+센서, 노브, 화면 흐름, 부팅은 모든 테마에서 같고, 그림 스타일만 다릅니다.
 
-**Boot (all themes):** an 80s computer starting up. The CRT warms up, a POST beep, and the BIOS counts memory and
-checks the real sensor and clock (OK or NONE). Then a short chiptune jingle (`SND_BOOT`, ~1.5 s) plays and the screen
-follows it note by note: the Suzuki "S" is scanned in on the power-up sweep, the classic "Jimny" wordmark appears one
-letter per note, and SUZUKI appears on the final "ta-da" (~4 s in total). The logos are traced to pixels from
-Wikimedia Commons (`LOGO_S`, `LOGO_SUZUKI`, `LOGO_JIMNY`). They are Suzuki trademarks, used here for a personal dash.
+**부팅 (모든 테마):** 80년대 컴퓨터가 켜지는 모습입니다. CRT가 예열되고, POST 비프음이 울리고, BIOS가 메모리를 세고
+실제 센서와 시계를 확인합니다(OK 또는 NONE). 그다음 짧은 칩튠 징글(`SND_BOOT`, 약 1.5초)이 울리고 화면이
+음에 맞춰 진행됩니다: 파워업 스윕에 스즈키 "S"가 스캔되어 나타나고, 음마다 클래식 "Jimny" 글자가 하나씩 나오고,
+마지막 "짠"에 SUZUKI가 나타납니다(전체 약 4초). 로고는 Wikimedia Commons의 로고를 픽셀로 변환한 것입니다
+(`LOGO_S`, `LOGO_SUZUKI`, `LOGO_JIMNY`). 스즈키의 상표이며, 여기서는 개인용 대시에 사용합니다.
 
-| | Clean (default) | Cyberpunk | 80s | 3D |
+| | Clean (기본) | Cyberpunk | 80s | 3D |
 |---|---|---|---|---|
-| Menu | Text list + small icons | HUD carousel | Double-line box + big arrows, IBM PC font | Spinning 3D wireframe models inside a targeting reticle, flying stars, a ship passes now and then |
-| Clock | Plain big digits | Rolling digits + seconds bar | 7-segment, unlit segments shown faintly, blinking colon | Gently swaying 3D block digits, changing digits flip over, spinning cube colon |
-| Tilt | Jimny silhouette + finely shaded ground | Jimny silhouette + road-striped ground + scan line | Jimny silhouette + grid ground + 7-segment numbers | Jimny outline (vector style) + dotted ground |
-| Screen change | Slide | Glitch | CRT shrinks to the center | Hyperspace jump (screen zooms in + star lines) |
+| 메뉴 | 글자 목록 + 작은 아이콘 | HUD 캐러셀 | 이중선 상자 + 큰 화살표, IBM PC 글꼴 | 조준선 안에서 도는 3D 와이어프레임 모델, 날아가는 별, 가끔 지나가는 우주선 |
+| 시계 | 단순한 큰 숫자 | 굴러가는 숫자 + 초 막대 | 7세그먼트, 꺼진 세그먼트는 흐리게, 깜빡이는 콜론 | 천천히 흔들리는 3D 블록 숫자, 바뀌는 숫자는 뒤집힘, 도는 큐브 콜론 |
+| 기울기 | 지므니 실루엣 + 촘촘하게 칠한 지면 | 지므니 실루엣 + 도로 줄무늬 지면 + 스캔 라인 | 지므니 실루엣 + 격자 지면 + 7세그먼트 숫자 | 지므니 윤곽선(벡터 스타일) + 점선 지면 |
+| 화면 전환 | 슬라이드 | 글리치 | CRT가 가운데로 줄어듦 | 하이퍼스페이스 점프(화면 확대 + 별 줄기) |
 
-Clean is the default because it is the easiest to read at a glance while driving.
-The 3D theme is styled after 80s vector arcade games: everything is drawn from 3D lines computed live
-(rotated, given perspective, then connected), not from pre-made images. Menu models: desk clock,
-gyroscope ball, G disc, battery, gear. The ship is an original design (X-wing style).
+Clean이 기본인 이유는 운전 중에 한눈에 읽기 가장 쉽기 때문입니다.
+3D 테마는 80년대 벡터 아케이드 게임 스타일입니다. 모든 것이 미리 만든 그림이 아니라 실시간으로 계산한 3D 선
+(회전, 원근, 연결)으로 그려집니다. 메뉴 모델: 탁상시계, 자이로스코프 공, G 원판, 배터리, 톱니바퀴.
+우주선은 직접 디자인했습니다(X-wing 스타일).
 
-**Burn-in protection:** an OLED that shows the same image for hours can keep a permanent ghost image.
-So in every theme, the clock screen shifts 1 pixel each minute (slowly circling within a ±2 pixel box),
-exactly when the minute changes, so it is not noticeable. The shift is limited to the empty space at the
-edges, so the image is never cut off. Shift pattern: `SHIFT_X` and `SHIFT_Y`.
+**번인 방지:** 같은 그림을 몇 시간 동안 보여 주는 OLED에는 영구적인 잔상이 남을 수 있습니다.
+그래서 모든 테마에서 시계 화면은 1분마다 1픽셀씩 움직입니다(±2픽셀 상자 안에서 천천히 돔).
+분이 바뀌는 순간에 움직이므로 눈에 띄지 않습니다. 이동은 가장자리의 빈 공간까지만 하므로
+그림이 잘리지 않습니다. 이동 패턴: `SHIFT_X`, `SHIFT_Y`.
 
-## How the sensor computes tilt
+## 센서가 기울기를 계산하는 방법
 
-Similar to a factory inclinometer (which uses the ESC/ABS sensors), but without wheel speed data:
-1. The **gyro** (rotation speed) is integrated continuously: fast response, not fooled by braking/accelerating.
-2. The **accelerometer** (direction of gravity) slowly corrects the gyro so it does not drift.
-3. If the accelerometer does not match 1 g or the gyro, that means a bump, braking, or accelerating.
-   The correction is reduced so no "fake tilt" appears.
-4. Braking/accelerating/turning rarely lasts more than 2 seconds. If the accelerometer and gyro disagree
-   for longer than that, the gyro is probably drifting, so the accelerometer is slowly trusted again.
-   This stops the number from jumping far if the gyro is slightly wrong.
-5. The gyro's zero error is learned automatically while the car is still (the first time during the boot
-   animation). Until it is ready, the tag at the top of the screen reads **GYRO CAL**.
+순정 기울기계(ESC/ABS 센서 사용)와 비슷하지만, 바퀴 속도 데이터는 없습니다:
+1. **자이로**(회전 속도)를 계속 적분합니다: 반응이 빠르고, 제동/가속에 속지 않습니다.
+2. **가속도계**(중력 방향)가 자이로가 흘러가지(drift) 않도록 천천히 보정합니다.
+3. 가속도계가 1 g나 자이로와 맞지 않으면 충격, 제동, 가속이라는 뜻입니다.
+   이때는 보정을 줄여서 "가짜 기울기"가 나오지 않게 합니다.
+4. 제동/가속/선회는 2초 이상 이어지는 일이 드뭅니다. 가속도계와 자이로가 그보다 오래 어긋나면
+   자이로가 흘러가고 있을 가능성이 높으므로, 다시 천천히 가속도계를 믿습니다.
+   자이로가 조금 틀렸을 때 숫자가 크게 튀는 것을 막아 줍니다.
+5. 자이로의 영점 오차는 차가 멈춰 있을 때 자동으로 학습합니다(처음에는 부팅 애니메이션 중).
+   준비가 끝날 때까지 화면 위쪽 표시는 **GYRO CAL**입니다.
 
-Test results in Wokwi:
-- Quick tilt at 30°/second → the display follows right away, with no lag.
-- Real tilt to 30° → the display shows 30.7° (sensor 30.5°).
-- Hard braking at 0.4 g for 1.5 seconds → PITCH moves only 2.9°. Using the accelerometer alone: ~22°.
+Wokwi 테스트 결과:
+- 초당 30°로 빠르게 기울이기 → 화면이 지연 없이 바로 따라감.
+- 실제로 30°까지 기울이기 → 화면 30.7° (센서 30.5°).
+- 0.4 g로 1.5초 강하게 제동 → PITCH는 2.9°만 움직임. 가속도계만 쓰면 약 22°.
 
-The sensor is read ~70 times per second. To do that, the image is sent to the display in parts and the
-sensor is read in between.
+센서는 초당 약 70번 읽습니다. 이를 위해 그림을 여러 부분으로 나눠 디스플레이에 보내고,
+그 사이사이에 센서를 읽습니다.
 
-## Try the sensor in Wokwi
+## Wokwi에서 센서 테스트
 
-While the simulation runs, click the MPU-6050 module. In Wokwi the **Acceleration** (direction of gravity)
-and **Rotation** (gyro) sliders are separate, while in a real car both change together:
-- Keep all **Rotation = 0** at the start. Otherwise the gyro cannot calibrate.
-- Move only **Acceleration** (Y = tilt left/right, X = uphill/downhill): the number moves to the new angle
-  within a few seconds, because a change without gyro rotation is treated as a push.
-- **Rotation is rotation speed (degrees per second), not an angle.** In a real car the gyro only reads a
-  value while the car is *moving* into a tilt, then goes back to 0 once it sits still at that tilt.
-  Leaving the Rotation slider at a fixed number means "the car keeps rolling forever", which never happens.
-  The result is a number stuck around **1.5 × the Rotation value** (example: Rotation 5 → about 7.5°),
-  because the gyro and accelerometer pull against each other.
-- The right way to fake a tilt with the gyro: move Rotation briefly (for example 30 for 1 second),
-  then back to 0, while moving Acceleration to the target angle.
-- To act like a real car, move both together.
+시뮬레이션이 실행 중일 때 MPU-6050 모듈을 클릭하세요. Wokwi에서는 **Acceleration**(중력 방향)과
+**Rotation**(자이로) 슬라이더가 따로 있지만, 실제 차에서는 둘이 함께 바뀝니다:
+- 시작할 때는 **Rotation을 모두 0**으로 두세요. 그렇지 않으면 자이로가 보정되지 않습니다.
+- **Acceleration**만 움직이면(Y = 좌우 기울기, X = 오르막/내리막) 몇 초 안에 숫자가 새 각도로 갑니다.
+  자이로 회전 없이 바뀐 것은 밀림으로 처리되기 때문입니다.
+- **Rotation은 각도가 아니라 회전 속도(초당 도)입니다.** 실제 차에서 자이로는 차가 기울어지는 *중*에만
+  값이 있고, 기울어진 채로 멈추면 다시 0이 됩니다. Rotation 슬라이더를 어떤 값에 두면
+  "차가 끝없이 계속 구른다"는 뜻인데, 실제로는 일어나지 않는 일입니다.
+  그 결과 숫자가 **Rotation 값의 약 1.5배**에서 멈춥니다(예: Rotation 5 → 약 7.5°).
+  자이로와 가속도계가 서로 당기기 때문입니다.
+- 자이로로 기울기를 흉내 내는 올바른 방법: Rotation을 잠깐(예: 1초 동안 30) 움직였다가
+  다시 0으로 돌리면서, Acceleration을 목표 각도로 옮깁니다.
+- 실제 차처럼 하려면 둘을 함께 움직이세요.
 
-| To simulate | Acc X | Acc Y | Acc Z |
+| 시뮬레이션 | Acc X | Acc Y | Acc Z |
 |---|---|---|---|
-| Level | 0 | 0 | 1 |
-| Tilt right ~30° | 0 | 0.5 | 0.87 |
-| Uphill ~20° | 0.34 | 0 | 0.94 |
+| 수평 | 0 | 0 | 1 |
+| 오른쪽으로 약 30° | 0 | 0.5 | 0.87 |
+| 오르막 약 20° | 0.34 | 0 | 0.94 |
 
-Above 25° the number blinks as a warning.
+25°를 넘으면 숫자가 경고로 깜빡입니다.
 
-## Installing in the car
+## 차에 설치하기
 
-- Sensor axes used by the code: **X toward the front of the car, Y to the left, Z up**.
-  If the module is mounted another way, swap the axes in `mpuUpdate()`.
-- After mounting, park on level ground, open TILT, and **hold the knob for 1 second**.
-- Let the car sit still for a few seconds after power-on so the gyro can calibrate.
-- Not yet included compared to the factory version: correction using wheel speed. Very long braking or
-  accelerating (more than a few seconds) can still shift the number slightly.
+- 코드가 쓰는 센서 축: **X는 차 앞쪽, Y는 왼쪽, Z는 위쪽**.
+  모듈을 다른 방향으로 달았다면 `mpuUpdate()`에서 축을 바꾸세요.
+- 설치한 뒤 평평한 곳에 주차하고, TILT를 열고, **노브를 1초 누르고 있으세요**.
+- 시동을 건 뒤 몇 초 동안 차를 움직이지 않으면 자이로가 보정됩니다.
+- 순정 제품과 비교해 아직 없는 것: 바퀴 속도를 이용한 보정. 아주 오래(몇 초 이상) 제동하거나
+  가속하면 숫자가 조금 밀릴 수 있습니다.
 
-## Customizing
+## 직접 바꾸기
 
-- Idle time before switching to the clock: `IDLE_TO_CLOCK_MS` (20000 = 20 seconds).
-- Menu items: the `MENU` array.
-- Default theme and language for an ESP32 that has never been set: `THEME_CLEAN` and `LANG_ID` in `loadSettings()`.
-- Brightness levels: `BRIGHT_PERCENT` (number on screen) and `BRIGHT_CONTRAST` (OLED "contrast" value 0–255).
-  An OLED cannot go fully dark even at contrast 0; the dimmest level depends on the display chip.
-- All text in both languages lives in one table, `TEXTS` (search for `// ---------- 2-language text`). New text:
-  add a name to `enum TextId` and one row to `TEXTS` in the same order, then use `tr(T_NAME)`.
-  English text is kept short so it fits in 128 pixels.
-- Code for each theme: search for `// ---------- CLEAN theme` and `// ---------- 80S theme`. Cyberpunk uses the
-  original functions (`drawMenu`, `drawClock`, `drawTilt`). The selector is in `drawScreen()`.
-- Boot: `drawBootPC()`. The jingle is `SND_BOOT`; if you change it, update the step numbers `BOOT_LETTER1`
-  (first letter note) and `BOOT_FINAL` (last note) so the screen stays in sync.
-- Glitch strength (Cyberpunk): `glitchFrame(amount, seed)`, `amount` from 0 to 1.
-- Tilt warning limits: `ROLL_WARN` and `PITCH_WARN` (degrees).
-- Night mode hours: `NIGHT_START_H` and `NIGHT_END_H`. Night level options: `NIGHT_OPTIONS`.
-- G-meter scale: `G_FULL` (g at the outer ring).
-- Buzzer sounds: `SND_CLICK`, `SND_HOLD`, `SND_WARN`, and the ABOUT song `SND_ABOUT` (list of `{tone Hz, length ms}`, tone 0 = silence).
-  Buzzer pin: `PIN_BUZZER`.
-- Jimny drawings on the tilt screen: `JIMNY_SIDE` (60×30) and `JIMNY_REAR` (40×41), one text line per
-  pixel row (`#` = on). They can be edited pixel by pixel. Source: SJ410 hardtop blueprint from
-  getoutlines.com (Creative Commons license).
+- 시계로 바뀌기 전 대기 시간: `IDLE_TO_CLOCK_MS` (20000 = 20초).
+- 메뉴 항목: `MENU` 배열.
+- 한 번도 설정하지 않은 ESP32의 기본 테마와 언어: `loadSettings()`의 `THEME_CLEAN`, `LANG_ID`.
+- 밝기 단계: `BRIGHT_PERCENT`(화면에 보이는 숫자), `BRIGHT_CONTRAST`(OLED "contrast" 값 0–255).
+  OLED는 contrast 0에서도 완전히 꺼지지 않으며, 가장 어두운 단계는 디스플레이 칩에 따라 다릅니다.
+- 두 언어의 모든 글자는 `TEXTS` 표 하나에 있습니다(`// ---------- 2-language text` 검색). 새 글자는
+  `enum TextId`에 이름을 추가하고, 같은 순서로 `TEXTS`에 한 줄을 추가한 뒤 `tr(T_NAME)`을 사용하세요.
+  영어 글자는 128픽셀에 들어가도록 짧게 유지합니다.
+- 테마별 코드: `// ---------- CLEAN theme`, `// ---------- 80S theme` 검색. Cyberpunk는
+  원래 함수(`drawMenu`, `drawClock`, `drawTilt`)를 씁니다. 선택은 `drawScreen()`에서 합니다.
+- 부팅: `drawBootPC()`. 징글은 `SND_BOOT`입니다. 바꾸면 화면이 계속 맞도록 단계 번호 `BOOT_LETTER1`
+  (첫 글자 음)과 `BOOT_FINAL`(마지막 음)도 고치세요.
+- 글리치 강도(Cyberpunk): `glitchFrame(amount, seed)`, `amount`는 0부터 1까지.
+- 기울기 경고 한계: `ROLL_WARN`, `PITCH_WARN` (도).
+- 야간 모드 시간: `NIGHT_START_H`, `NIGHT_END_H`. 야간 단계 선택지: `NIGHT_OPTIONS`.
+- G-미터 눈금: `G_FULL` (바깥 원의 g).
+- 부저 소리: `SND_CLICK`, `SND_HOLD`, `SND_WARN`, ABOUT 노래 `SND_ABOUT` (`{음 Hz, 길이 ms}` 목록, 음 0 = 무음).
+  부저 핀: `PIN_BUZZER`.
+- 기울기 화면의 지므니 그림: `JIMNY_SIDE`(60×30), `JIMNY_REAR`(40×41). 픽셀 한 줄당 글자 한 줄
+  (`#` = 켜짐)이라 픽셀 단위로 직접 고칠 수 있습니다. 출처: getoutlines.com의 SJ410 하드탑 도면
+  (크리에이티브 커먼즈 라이선스).
 
-## Hardware notes
+## 하드웨어 메모
 
-- 1.3" OLED displays usually use the **SH1106** chip, not the SSD1306.
-  If the image looks random or shifted, replace the `U8G2_SSD1306_...` line with
-  `U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);`
-- For a yellow look, buy the **yellow** OLED version. 2.42" size (SSD1309 chip):
+- 1.3인치 OLED는 보통 SSD1306이 아니라 **SH1106** 칩을 씁니다.
+  그림이 깨지거나 밀리면 `U8G2_SSD1306_...` 줄을
+  `U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);`로 바꾸세요.
+- 노란 화면을 원하면 **노란색** OLED를 사세요. 2.42인치(SSD1309 칩):
   `U8G2_SSD1309_128X64_NONAME0_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);`
-- The display, MPU-6050, and RTC share the same I2C bus (SDA 21, SCL 22). Their addresses must differ:
-  display 0x3C, RTC 0x68, MPU-6050 **0x69**. Because the MPU-6050 also defaults to 0x68, **the MPU-6050 AD0
-  pin must be wired to 3V3** to move it to 0x69. If you forget, the sensor and the clock clash.
+- 디스플레이, MPU-6050, RTC는 같은 I2C 버스(SDA 21, SCL 22)를 같이 씁니다. 주소가 달라야 합니다:
+  디스플레이 0x3C, RTC 0x68, MPU-6050 **0x69**. MPU-6050도 기본 주소가 0x68이므로
+  **MPU-6050의 AD0 핀을 3V3에 꼭 연결**해서 0x69로 바꿔야 합니다. 잊으면 센서와 시계가 충돌합니다.
 
-### Buzzer
-- Use a **PASSIVE** buzzer (can play different tones). An active buzzer plays only one tone and will sound odd.
-  How to tell: an active buzzer usually has a sticker and a sealed bottom; a passive buzzer shows a green
-  board underneath. Or connect it to 3V3: an active buzzer beeps right away, a passive one only clicks.
-- For a desk prototype, a small piezo buzzer can go straight to GPIO 25 through a 100Ω resistor.
-- In the car (loud enough over the engine), use an NPN transistor (S8050 / 2N2222):
-  GPIO 25 → 1kΩ resistor → base; emitter to GND; buzzer between 3V3/5V and the collector; plus a reversed
-  1N4148 diode across the buzzer if it is a magnetic type (not piezo).
-- Wokwi uses `wokwi-buzzer`, and the sound plays in the browser.
+### 부저
+- **패시브** 부저를 쓰세요(여러 음을 낼 수 있음). 액티브 부저는 한 음만 나서 이상하게 들립니다.
+  구별법: 액티브 부저는 보통 스티커가 붙어 있고 바닥이 막혀 있습니다. 패시브 부저는 바닥에 초록색
+  기판이 보입니다. 또는 3V3에 연결해 보세요: 액티브는 바로 삑 소리가 나고, 패시브는 "딱" 소리만 납니다.
+- 책상 위 프로토타입에서는 작은 피에조 부저를 100Ω 저항을 거쳐 GPIO 25에 바로 연결해도 됩니다.
+- 차 안에서는(엔진 소리보다 크게) NPN 트랜지스터(S8050 / 2N2222)를 쓰세요:
+  GPIO 25 → 1kΩ 저항 → 베이스, 이미터는 GND, 부저는 3V3/5V와 컬렉터 사이.
+  자기식(피에조가 아닌) 부저라면 부저 양단에 1N4148 다이오드를 거꾸로 답니다.
+- Wokwi는 `wokwi-buzzer`를 쓰며, 소리는 브라우저에서 납니다.
 
-### Clock (RTC DS3231, ZS-042 module)
-- The time is read from the RTC at power-on, then synced again every minute. If no RTC is found, the clock
-  starts from the compile time, and the SET CLOCK screen shows "NO RTC".
-- **Coin cell:** the ZS-042 module has a charging circuit for rechargeable cells. Use an **LIR2032**.
-  If you use a **CR2032** (not rechargeable), **remove the 200Ω resistor** (or its diode) on the module,
-  so the CR2032 is not "charged" (it can leak or swell).
-- **Power:** the coin cell already keeps the clock running while the car is off (the DS3231 needs only ~3 µA).
-  Recommended: power the module's VCC from the **ESP32 3V3**, like the other parts. If the RTC's VCC stays
-  powered from BATT+ while the ESP32 is off, current can leak through the module's I2C pull-up resistors into
-  the unpowered ESP32. If you still want BATT+ (12V), a regulator down to 3.3V is required, and the module's
-  I2C pull-ups should be removed.
-- Mount the module somewhere easy to reach, so the coin cell can be replaced.
-- Wokwi has no DS3231, so `diagram.json` uses a **DS1307**. The time registers are the same, so the code is
-  the same. Wokwi fills the DS1307 clock with the computer's time when the simulation starts.
+### 시계 (RTC DS3231, ZS-042 모듈)
+- 전원을 켜면 RTC에서 시간을 읽고, 이후 1분마다 다시 맞춥니다. RTC가 없으면 시계는
+  컴파일 시간부터 시작하고, SET CLOCK 화면에 "NO RTC"가 표시됩니다.
+- **코인 전지:** ZS-042 모듈에는 충전식 전지용 충전 회로가 있습니다. **LIR2032**를 쓰세요.
+  **CR2032**(충전 불가)를 쓴다면 모듈의 **200Ω 저항(또는 다이오드)을 떼어 내세요**.
+  그래야 CR2032가 "충전"되지 않습니다(새거나 부풀 수 있음).
+- **전원:** 시동이 꺼져 있어도 코인 전지가 시계를 계속 돌립니다(DS3231은 약 3 µA만 필요).
+  권장: 다른 부품처럼 모듈의 VCC를 **ESP32 3V3**에서 받으세요. ESP32가 꺼진 동안 RTC의 VCC가
+  BATT+에서 계속 전원을 받으면, 모듈의 I2C 풀업 저항을 통해 꺼진 ESP32로 전류가 샐 수 있습니다.
+  그래도 BATT+(12V)를 쓰고 싶다면 3.3V 레귤레이터가 꼭 필요하고, 모듈의 I2C 풀업은 떼는 것이 좋습니다.
+- 코인 전지를 바꿀 수 있도록 모듈은 손이 닿기 쉬운 곳에 다세요.
+- Wokwi에는 DS3231이 없어서 `diagram.json`은 **DS1307**을 씁니다. 시간 레지스터가 같아서 코드도
+  같습니다. Wokwi는 시뮬레이션을 시작할 때 컴퓨터 시간으로 DS1307 시계를 채웁니다.
 
-## Wiring
+## 배선
 
-| Part | Pin | ESP32 |
+| 부품 | 핀 | ESP32 |
 |---|---|---|
 | OLED | SDA | GPIO 21 |
 | OLED | SCL | GPIO 22 |
@@ -292,12 +292,12 @@ Above 25° the number blinks as a warning.
 | MPU-6050 | SDA | GPIO 21 |
 | MPU-6050 | SCL | GPIO 22 |
 | MPU-6050 | VCC / GND | 3V3 / GND |
-| MPU-6050 | **AD0** | **3V3** (address becomes 0x69) |
+| MPU-6050 | **AD0** | **3V3** (주소가 0x69가 됨) |
 | RTC DS3231 | SDA | GPIO 21 |
 | RTC DS3231 | SCL | GPIO 22 |
-| RTC DS3231 | VCC / GND | 3V3 / GND (see the power note above) |
+| RTC DS3231 | VCC / GND | 3V3 / GND (위의 전원 메모 참고) |
 | KY-040 | CLK | GPIO 18 |
 | KY-040 | DT | GPIO 19 |
 | KY-040 | SW | GPIO 5 |
 | KY-040 | + / GND | 3V3 / GND |
-| Passive buzzer | + / − | GPIO 25 (through a resistor/transistor) / GND |
+| 패시브 부저 | + / − | GPIO 25 (저항/트랜지스터 경유) / GND |
