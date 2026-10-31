@@ -147,8 +147,9 @@ turned off. Sensor, knob, screen flow, and the boot are the same for all themes.
 
 **Boot (all themes):** an 80s computer starting up. The CRT warms up, a POST beep, and the BIOS counts memory and
 checks the real sensor and clock (OK or NONE). Then a short chiptune jingle (`SND_BOOT`, ~1.5 s) plays and the screen
-follows it note by note: raster bars on the power-up sweep, one letter of JIMNY per note, then stripes,
-RETRO DASH, and READY. on the final "ta-da" (~4 s in total).
+follows it note by note: the Suzuki "S" is scanned in on the power-up sweep, the classic "Jimny" wordmark appears one
+letter per note, and SUZUKI appears on the final "ta-da" (~4 s in total). The logos are traced to pixels from
+Wikimedia Commons (`LOGO_S`, `LOGO_SUZUKI`, `LOGO_JIMNY`). They are Suzuki trademarks, used here for a personal dash.
 
 | | Clean (default) | Cyberpunk | 80s | 3D |
 |---|---|---|---|---|
