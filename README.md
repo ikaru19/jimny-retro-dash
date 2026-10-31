@@ -1,295 +1,268 @@
-# Jimny Cyber Dash
+# Jimny Retro Dash
 
-Layar digital untuk dashboard Suzuki Jimny.
-Versi v0.4: animasi boot, menu, jam, dan inclinometer (MPU-6050), dengan 3 tema:
-**Clean** (bawaan), **Cyberpunk**, dan **80-an**, serta 2 bahasa: **Indonesia** (bawaan) dan **English**. Sudah dites di preview Mac, dan sudah berhasil di-compile untuk ESP32.
+A digital display for the Suzuki Jimny dashboard, running on an ESP32 with a 128×64 OLED.
+Version v0.4: boot animation, menu, clock, inclinometer (MPU-6050), G-meter, and buzzer feedback, with 4 themes:
+**Clean** (default), **Cyberpunk**, **80s**, and **3D**, and 2 languages: **Indonesian** (default) and **English**.
+Tested in a Mac preview and compiled for the ESP32.
 
-## Cara kerja paling enak (di Mac)
+## Workflow
 
-Buka folder ini di VS Code, lalu taruh jendela preview di samping kode.
-
-| Mau apa | Caranya | Waktu |
+| Goal | How | Time |
 |---|---|---|
-| **Desain** (animasi, gambar, menu) | VS Code: `Cmd+Shift+P` → *Run Task* → **Preview Mac (auto)**. Atau di terminal: `./preview.sh watch menu` | ~2 detik setelah simpan |
-| **Cek akhir di simulator ESP32** | `Cmd+Shift+B` (Build ESP32), lalu `Cmd+Shift+P` → **Wokwi: Start Simulator** | ~16 detik |
-| **Upload ke ESP32 asli** | *Run Task* → **Upload ke ESP32 asli** | |
+| **Final check in the ESP32 simulator** | `./build-esp32.sh`, then in VS Code: `Cmd+Shift+P` → **Wokwi: Start Simulator** | ~16 s |
+| **Upload to a real ESP32** | `./build-esp32.sh upload` | |
+| **Test one part at a time** | `./tes.sh 01` … `./tes.sh 05` (see [Component tests](#component-tests)) | |
 
-Alur hariannya:
-1. Jalankan **Preview Mac (auto)** sekali. Jendela OLED kuning muncul dan selalu di atas.
-2. Edit `sketch.ino` lalu simpan (`Cmd+S`). Preview build ulang dan restart sendiri.
-   Kalau ada error, preview lama tetap jalan dan errornya muncul di tab *Problems* VS Code.
-3. Sesekali, atau sebelum beli/pasang hardware, cek di **Wokwi VS Code**. Simulatornya sama
-   dengan Wokwi online, tapi compile di Mac, jadi tidak antre.
+Both scripts use [arduino-cli](https://arduino.github.io/arduino-cli/) with the `esp32:esp32` core and the
+`U8g2` library (`arduino-cli lib install U8g2`).
 
-Mulai dari layar tertentu (supaya tidak menunggu animasi boot):
-`./preview.sh watch kemiringan` (pilihan: `boot`, `menu`, `jam`, `kemiringan`, `gmeter`, `setelan`).
+Day to day, the design work (animations, drawings, menus) happens in a Mac preview that rebuilds and
+restarts about 2 seconds after each save of `sketch.ino`. The Mac preview (`preview.sh` and `desktop/`)
+is **not published in this repo yet**.
 
-**Tes animasi boot per tema:**
-- Dari perintah, tambahkan nama tema: `./preview.sh watch boot clean`, `./preview.sh watch boot cyber`,
-  atau `./preview.sh watch boot 80an` (tema: `clean`, `cyber`, `80an`, `3d`). Temanya sekalian tersimpan.
-- Atau di jendela preview: ganti tema di SETELAN → TEMA, lalu tekan **K**. Program diulang dari awal,
-  seperti ACC dimatikan lalu dinyalakan, jadi animasi boot tema itu tampil. Klik knob saat boot = lewati.
+### First time in Wokwi for VS Code
+Wokwi needs a free license (personal use): `Cmd+Shift+P` → **Wokwi: Request a new License**,
+then sign in in the browser. Only once.
 
-Tema, bahasa, dan kecerahan tersimpan di `desktop/build/nvs.txt` (tiruan memori ESP32). Jam yang disetel lewat ATUR JAM
-disimpan di `desktop/build/rtc.txt` (tiruan RTC; selisih dari jam Mac). Hapus file itu untuk kembali ke bawaan.
-Coba tanpa RTC: `./desktop/build/jimny-preview --no-rtc` (jalankan dari folder `desktop`).
+### Files
 
-### Tombol di jendela preview
-
-| Tombol | Fungsi |
+| File | Contents |
 |---|---|
-| ← / → atau scroll mouse | Putar knob |
-| Spasi / Enter | Klik knob (tahan = tahan) |
-| A / D | Mobil miring kiri / kanan (25°/detik selama ditahan) |
-| W / S | Mobil nanjak / turun |
-| R | Mobil kembali datar |
-| B / G | Rem / gas (selama ditahan) |
-| Z / X | Belok kiri / kanan (selama ditahan, untuk G-meter) |
-| J | Jalan rusak 2 detik |
-| K | Boot ulang (ACC mati lalu nyala lagi). Setelan dan jam tetap tersimpan |
-| P | Screenshot ke `desktop/build/` |
-| T | Selalu di atas: on/off |
-| M | Buzzer bisu: on/off (suara buzzer keluar dari speaker Mac) |
-| Q / Esc | Keluar |
+| `sketch.ino` | Main code |
+| `tes/` | 5 small test programs, one per component |
+| `tes.sh` | Uploads a test and opens the Serial Monitor |
+| `build-esp32.sh` | Compile / upload for the ESP32 |
+| `diagram.json` | Circuit for Wokwi (online and VS Code) |
+| `wokwi.toml` | Connects Wokwi for VS Code to the compiled firmware |
+| `libraries.txt` | Libraries for Wokwi online |
 
-Sensor di preview adalah MPU-6050 virtual. Gyro dan accelerometernya bergerak bersamaan
-seperti di mobil asli, lengkap dengan sedikit bias dan getaran mesin. Jadi tidak ada
-masalah slider "Rotation" seperti di Wokwi.
+## Component tests
 
-**Batas preview Mac:** ini cuma tampilan dan logika. Tidak mengetes kabel, chip ESP32, atau
-I2C asli. Kecepatan kirim gambar ke layar memang ditiru (~50ms per frame), tapi tetap cek
-di Wokwi atau hardware asli sebelum dipasang.
+Build the prototype one part at a time and test each part before adding the next.
+`./tes.sh` lists the tests; `./tes.sh 03` uploads test 03 and opens the Serial Monitor (exit with Ctrl+C).
+`./tes.sh monitor` opens only the Serial Monitor.
 
-### Pertama kali di Wokwi VS Code
-Wokwi minta lisensi gratis (pemakaian pribadi): `Cmd+Shift+P` → **Wokwi: Request a new License**,
-lalu login di browser. Cukup sekali.
+| Test | Checks | Expected result |
+|---|---|---|
+| `01-kedip` | ESP32 is alive and accepts uploads | Blue LED blinks, "Halo dari ESP32!" every second |
+| `02-scan` | Devices on the I2C bus | `0x3C` = display, `0x69` = MPU-6050 (`0x68` means AD0 is not wired to 3V3) |
+| `03-layar` | Display | "HALO JIMNY", a seconds counter, and a moving dot |
+| `04-knob` | KY-040 knob | Number goes up/down when turning, click counter goes up when pressing |
+| `05-miring` | MPU-6050 | Roll and pitch in degrees, plus a horizon line that stays level |
 
-### Isi folder
+## Run in Wokwi online
 
-| File | Isi |
+1. Open https://wokwi.com/projects/new/esp32
+2. `sketch.ino` tab: delete its contents and paste `sketch.ino` from this repo.
+3. `diagram.json` tab: delete its contents and paste `diagram.json`.
+4. **Library Manager** tab > **+** button > search `U8g2` > click it.
+5. Click the green ▶ button. Wait for the compile (the free queue can take 20–60 seconds).
+
+## Using the knob
+
+Screen names below are in English. With the default language (Indonesian) they read
+JAM, KEMIRINGAN, SETELAN, and so on.
+
+| Action | Result |
 |---|---|
-| `sketch.ino` | Kode utama, dipakai semua cara di atas |
-| `diagram.json` | Rangkaian untuk Wokwi (online dan VS Code) |
-| `wokwi.toml` | Penghubung Wokwi VS Code ke hasil compile |
-| `preview.sh` | Preview Mac |
-| `build-esp32.sh` | Compile / upload ESP32 |
-| `desktop/` | Isi preview Mac: tiruan Arduino, layar, knob, MPU-6050 dan RTC virtual |
-| `arsip/sketch-dengan-wifi.ino` | Versi dengan fitur WiFi (setel lewat HP + QR + jam internet). Disimpan untuk nanti, tidak dipakai di MVP |
-| `arsip/sketch-kemiringan-2d.ino` | Versi kemiringan lama (gambar 2D poligon, jarum 80-an) |
-| `arsip/sketch-kemiringan-3d.ino` | Percobaan kemiringan 3D (kurang mirip Jimny di layar sekecil ini) |
+| Turn | Move through the menu. On the clock screen: back to the menu |
+| Click | Enter / back. During boot: skip the animation |
+| Hold 1 second | On the TILT screen: the current position becomes zero ("ZERO SET") |
+| Turn (on TILT) | Reset the recorded MAX angles ("MAX RESET") |
+| On SETTINGS | Turn = choose LANGUAGE / THEME / BACK, click = open |
+| On LANGUAGE or THEME | Turn = choose (themes show a small preview), click = save. Text/style changes right away. Choose BACK to cancel |
+| On SET CLOCK | Turn = change hour, click = go to minutes, turn = change minutes, click = save to the RTC. Hold = cancel |
+| On BRIGHTNESS | Turn = change (the display dims/brightens right away), click = save, hold = cancel |
+| On NIGHT MODE | Turn = choose OFF / 20 / 40 / 60%, click = save, hold = cancel |
+| On G-METER | Click = back to the menu. Turn or hold = reset MAX |
+| During the TILT! warning | Click = go straight to the TILT screen |
 
-## Jalankan di Wokwi online
+In Wokwi: click the small arrows next to the knob to turn it, click the middle of the knob to press,
+and keep the click held to "hold".
 
-1. Buka https://wokwi.com/projects/new/esp32
-2. Tab `sketch.ino`: hapus isinya, tempel isi `sketch.ino` dari folder ini.
-3. Tab `diagram.json`: hapus isinya, tempel isi `diagram.json`.
-4. Tab **Library Manager** > tombol **+** > cari `U8g2` > klik.
-5. Klik tombol hijau ▶. Tunggu compile (antrean gratis bisa 20-60 detik).
+## Screen flow
 
-## Cara pakai knob
+Each screen's style depends on the theme (see **Themes** below). The flow is the same:
 
-| Aksi | Hasil |
-|---|---|
-| Putar | Pindah menu. Di layar jam: kembali ke menu |
-| Klik | Masuk / kembali. Saat boot: lewati animasi |
-| Tahan 1 detik | Di layar KEMIRINGAN: posisi sekarang jadi titik nol (muncul "NOL DISET") |
-| Putar (di KEMIRINGAN) | Reset rekaman sudut MAX (muncul "MAX DIRESET") |
-| Di SETELAN | Putar = pilih BAHASA / TEMA / KEMBALI, klik = buka |
-| Di BAHASA atau TEMA | Putar = pilih (tema ada contoh kecilnya), klik = simpan. Teks/gaya langsung berubah. Pilih KEMBALI untuk batal |
-| Di ATUR JAM | Putar = ubah jam, klik = pindah ke menit, putar = ubah menit, klik = simpan ke RTC. Tahan = batal |
-| Di KECERAHAN | Putar = ubah (layar langsung ikut redup/terang), klik = simpan, tahan = batal |
-| Di MODE MALAM | Putar = pilih MATI / 20 / 40 / 60%, klik = simpan, tahan = batal |
-| Di G-METER | Klik = kembali ke menu. Putar atau tahan = reset MAX |
-| Saat peringatan MIRING! | Klik = langsung ke layar KEMIRINGAN |
+1. **Boot** → menu. Click to skip.
+2. **Menu**: **CLOCK**, **TILT**, **G-METER**, **BATTERY** (coming soon), **SETTINGS**.
+3. **SETTINGS** → **LANGUAGE** (Indonesian / English), **THEME** (Clean / Cyberpunk / 80s / 3D),
+   **BRIGHTNESS** (20–100%, 5 levels), **NIGHT MODE**, or **SET CLOCK**. After saving, it returns to SETTINGS.
+   Language, theme, and brightness are stored in ESP32 memory; the time is stored in the RTC.
+4. **Idle for 20 seconds** on the menu, a "coming soon" screen, or SETTINGS → switches to **CLOCK** automatically.
+   The TILT screen never switches by itself, because it is used while driving.
+5. **CLOCK**: big clock. Turn or click to go back to the menu.
+6. **TILT**: like a factory inclinometer. Left = **side view** (PITCH, front of the car facing left),
+   right = **rear view** (ROLL). The Jimny silhouette is taken straight from an SJ410 hardtop blueprint
+   (same body as the JA11) and rotated to the angle, on top of ground that tilts with it.
+   Big numbers sit at the bottom right of each panel. The solid ground line = the ground under the car,
+   the dotted line = a level floor for reference. ROLL and PITCH numbers stay big so they read at a glance;
+   above 25° they blink. **MAX** = the largest angle since the last reset.
+   Real data comes from the MPU-6050 (**LIVE** tag); without the sensor it shows moving sample data (**DEMO**).
+   ROLL + = right side down, PITCH + = uphill.
 
-Di Wokwi: klik panah kecil di samping knob untuk memutar, klik tengah knob untuk tombol,
-tahan klik untuk "tahan".
+## Tilt warning, G-meter, night mode
 
-## Alur layar
+**Tilt warning:** if the car tilts more than **30° (roll)** or **35° (pitch)**, a big **TILT!** warning
+appears on any screen (blinking, with hazard stripes) plus the worst angle.
+Click to go straight to the TILT screen; on that screen the warning is a blinking frame.
+The warning clears once the angle stays 3° below the limit for 1 second (so it does not flicker at the
+limit). It is only active when the sensor is connected and the gyro is calibrated.
 
-Gaya tiap layar tergantung tema (lihat bagian **Tema** di bawah). Alurnya sama:
+**G-meter** (G-METER menu): a dot moves like a ball in a bowl. Braking = dot moves up, accelerating = down,
+turning left = right, turning right = left. Outer ring 0.8 g, inner ring 0.4 g. The table on the right
+shows the current value and MAX for braking, accelerating, and turning. It is computed from the
+accelerometer minus gravity (using the car's angle from the tilt sensor), then smoothed so engine
+vibration does not get in the way. Note: long braking or accelerating can shift the angle slightly,
+so the G value can be off by ~0.05 g.
 
-1. **Boot** → menu. Klik untuk melewati.
-2. **Menu**: **JAM**, **KEMIRINGAN**, **G-METER**, **VOLT AKI** (segera hadir), **SETELAN**.
-   Dalam bahasa Inggris: CLOCK, TILT, G-METER, BATTERY, SETTINGS.
-3. **SETELAN** → **BAHASA** (Indonesia / English), **TEMA** (Clean / Cyberpunk / 80-an),
-   **KECERAHAN** (20–100%, 5 tingkat), **MODE MALAM**, atau **ATUR JAM**. Setelah disimpan, kembali ke SETELAN.
-   Bahasa, tema, dan kecerahan disimpan di memori ESP32; jam disimpan di RTC.
-4. **Diam 20 detik** di menu, layar "segera hadir", atau SETELAN → otomatis pindah ke **JAM**.
-   Layar KEMIRINGAN tidak pindah sendiri, karena dipakai saat menyetir.
-5. **JAM**: jam besar. Putar atau klik untuk kembali ke menu.
-6. **KEMIRINGAN**: seperti inclinometer bawaan mobil. Kiri = **tampak samping** (PITCH, depan mobil
-   menghadap kiri), kanan = **tampak belakang** (ROLL). Siluet Jimny diambil langsung dari blueprint
-   SJ410 hardtop (bodi sama dengan JA11) dan diputar sesuai sudut, di atas lereng tanah yang ikut miring.
-   Angka besar di kanan-bawah tiap panel. Garis lantai tegas = tanah di
-   bawah mobil, titik-titik = lantai datar sebagai acuan. Angka ROLL (kiri) dan PITCH (kanan) tetap
-   besar supaya terbaca sekilas; lebih dari 25° angkanya berkedip. **MAX** = sudut terbesar sejak reset.
-   Data asli dari MPU-6050 (tanda **LIVE**); tanpa sensor pakai data bergerak sendiri (**DEMO**).
-   ROLL + = sisi kanan turun, PITCH + = nanjak.
+**Night mode** (SETTINGS → NIGHT MODE): from **18:00 to 06:00** the display dims automatically to the
+chosen level (default 40%). At night, brightness is **capped** at the night level, even if BRIGHTNESS is set
+higher. Choose OFF to disable it.
 
-## Peringatan miring, G-meter, mode malam
+**Buzzer:** every knob click gives a short "beep" (2700 Hz, 18 ms); holding the knob gives a lower one
+(1500 Hz, 60 ms). While the tilt warning is shown, a "beep-beep ... beep-beep" alarm keeps sounding until
+the car is safe again. Clicks during a screen transition make no sound (those clicks are ignored).
 
-**Peringatan miring:** kalau mobil miring lebih dari **30° (roll)** atau **35° (pitch)**, di layar apa
-pun muncul peringatan besar **MIRING!** (berkedip, dengan garis bahaya) plus sudut yang paling parah.
-Klik untuk langsung ke layar KEMIRINGAN; di layar itu peringatannya berupa bingkai berkedip.
-Peringatan hilang setelah sudut turun 3° di bawah batas selama 1 detik (supaya tidak berkedip-kedip
-di batas). Hanya aktif kalau sensor tersambung dan gyro sudah terkalibrasi.
+## Themes
 
-**G-meter** (menu G-METER): titik bergerak seperti bola di mangkuk. Rem = titik naik, gas = turun,
-belok kiri = ke kanan, belok kanan = ke kiri. Lingkaran luar 0.8 g, lingkaran dalam 0.4 g. Tabel di
-kanan: nilai sekarang dan MAX untuk rem, gas, dan belok. Dihitung dari accelerometer dikurangi gravitasi
-(memakai sudut mobil dari sensor kemiringan), lalu diperhalus supaya getaran mesin tidak mengganggu.
-Catatan: rem atau gas yang lama bisa menggeser sudut sedikit, jadi angka G bisa meleset ~0.05 g.
+Choose in **SETTINGS**. The choice is stored in ESP32 memory (NVS), so it is remembered after the car is
+turned off. Sensor, knob, and screen flow are the same for all themes. Only the drawing style differs.
 
-**Mode malam** (SETELAN → MODE MALAM): jam **18:00–06:00** layar otomatis redup ke tingkat yang
-dipilih (bawaan 40%). Di malam hari, kecerahan tampil **paling tinggi** sebesar tingkat malam, walau
-setelan KECERAHAN lebih terang. Pilih MATI untuk mematikan.
-
-**Buzzer:** setiap klik knob bunyi "tit" pendek (2700 Hz, 18 ms), tahan knob bunyi lebih rendah
-(1500 Hz, 60 ms). Selama peringatan miring tampil, alarm "tit-tit ... tit-tit" bunyi terus sampai mobil
-aman lagi. Klik saat dalam putaran animasi pindah layar tidak bunyi (kliknya memang diabaikan).
-Di preview Mac suaranya keluar dari speaker; tekan **M** untuk bisu. Tes tanpa jendela bisa
-menulis setiap bunyi ke terminal dengan `--log-sound`.
-
-## Tema
-
-Pilih di **SETELAN**. Pilihan disimpan di memori ESP32 (NVS), jadi tetap diingat walau mobil dimatikan.
-Sensor, knob, dan alur layar sama untuk semua tema. Yang beda cuma gaya gambarnya.
-
-| | Clean (bawaan) | Cyberpunk | 80-an | 3D |
+| | Clean (default) | Cyberpunk | 80s | 3D |
 |---|---|---|---|---|
-| Boot | Logo JIMNY muncul pelan (~2 dtk) | Sinyal rusak, hujan kode, kota neon (~9 dtk) | TV menyala, matahari bergaris terbit, SUZUKI krom (~4 dtk) | Keluar hyperspace, pesawat datang berguling lalu lewat, tulisan JIMNY 3D (~4 dtk) |
-| Menu | Daftar teks + ikon kecil | Carousel HUD | Kotak bergaris ganda + panah besar, font PC IBM | Model kawat 3D berputar di dalam bidikan, bintang terbang, pesawat lewat sesekali |
-| Jam | Angka besar polos | Angka gulung + bar detik | 7-segmen, segmen mati tampil samar, titik dua berkedip | Angka balok 3D bergoyang pelan, angka yang berganti berputar balik (flip), titik dua kubus berputar |
-| Kemiringan | Siluet Jimny + tanah diarsir halus | Siluet Jimny + tanah bergaris jalan + garis scan | Siluet Jimny + tanah grid + angka 7-segmen | Garis tepi Jimny (gaya vektor) + tanah titik-titik |
-| Pindah layar | Geser | Glitch | TV tabung menyusut ke tengah | Lompat hyperspace (layar membesar + garis bintang) |
+| Boot | JIMNY logo fades in (~2 s) | Broken signal, code rain, neon city (~9 s) | TV turns on, striped sun rises, chrome SUZUKI (~4 s) | Drops out of hyperspace, a ship rolls in and flies past, 3D JIMNY title (~4 s) |
+| Menu | Text list + small icons | HUD carousel | Double-line box + big arrows, IBM PC font | Spinning 3D wireframe models inside a targeting reticle, flying stars, a ship passes now and then |
+| Clock | Plain big digits | Rolling digits + seconds bar | 7-segment, unlit segments shown faintly, blinking colon | Gently swaying 3D block digits, changing digits flip over, spinning cube colon |
+| Tilt | Jimny silhouette + finely shaded ground | Jimny silhouette + road-striped ground + scan line | Jimny silhouette + grid ground + 7-segment numbers | Jimny outline (vector style) + dotted ground |
+| Screen change | Slide | Glitch | CRT shrinks to the center | Hyperspace jump (screen zooms in + star lines) |
 
-Clean jadi bawaan karena paling mudah dibaca sekilas saat menyetir.
-Tema 3D bergaya game arcade vektor 80-an: semua digambar dari garis 3D yang dihitung langsung
-(diputar, diberi perspektif, lalu disambung), bukan gambar jadi. Model menu: jam meja, bola giroskop,
-piringan G, aki, roda gigi. Pesawatnya desain sendiri (sayap X).
+Clean is the default because it is the easiest to read at a glance while driving.
+The 3D theme is styled after 80s vector arcade games: everything is drawn from 3D lines computed live
+(rotated, given perspective, then connected), not from pre-made images. Menu models: desk clock,
+gyroscope ball, G disc, battery, gear. The ship is an original design (X-wing style).
 
-**Anti burn-in:** OLED yang menampilkan gambar sama berjam-jam bisa meninggalkan bayangan permanen.
-Jadi di semua tema, layar jam digeser 1 piksel tiap menit (berputar pelan dalam kotak ±2 piksel),
-tepat saat angka menit berganti, jadi tidak terasa. Geseran dibatasi ruang kosong di pinggir, jadi
-gambar tidak pernah terpotong. Pola geser: `SHIFT_X` dan `SHIFT_Y`.
+**Burn-in protection:** an OLED that shows the same image for hours can keep a permanent ghost image.
+So in every theme, the clock screen shifts 1 pixel each minute (slowly circling within a ±2 pixel box),
+exactly when the minute changes, so it is not noticeable. The shift is limited to the empty space at the
+edges, so the image is never cut off. Shift pattern: `SHIFT_X` and `SHIFT_Y`.
 
-## Cara sensor menghitung miring
+## How the sensor computes tilt
 
-Mirip inclinometer pabrikan (yang memakai sensor sistem ESC/ABS), tapi tanpa data kecepatan roda:
-1. **Gyro** (kecepatan putar) dijumlahkan terus: respons cepat, tidak tertipu rem/gas.
-2. **Accelerometer** (arah gravitasi) pelan-pelan mengoreksi supaya gyro tidak melenceng (drift).
-3. Kalau accelerometer tidak cocok dengan 1g atau dengan gyro, itu tandanya ada guncangan, rem,
-   atau gas. Koreksinya dikurangi supaya tidak muncul "miring palsu".
-4. Rem/gas/belok jarang lebih dari 2 detik. Kalau accelerometer dan gyro tidak cocok lebih lama
-   dari itu, kemungkinan gyro yang melenceng, jadi accelerometer dipercaya lagi pelan-pelan.
-   Ini mencegah angka melonjak jauh kalau gyro salah sedikit.
-5. Kesalahan nol gyro dipelajari otomatis saat mobil diam (pertama kali saat animasi boot).
-   Selama belum siap, tanda di atas layar tertulis **KALIBRASI GYRO**.
+Similar to a factory inclinometer (which uses the ESC/ABS sensors), but without wheel speed data:
+1. The **gyro** (rotation speed) is integrated continuously: fast response, not fooled by braking/accelerating.
+2. The **accelerometer** (direction of gravity) slowly corrects the gyro so it does not drift.
+3. If the accelerometer does not match 1 g or the gyro, that means a bump, braking, or accelerating.
+   The correction is reduced so no "fake tilt" appears.
+4. Braking/accelerating/turning rarely lasts more than 2 seconds. If the accelerometer and gyro disagree
+   for longer than that, the gyro is probably drifting, so the accelerometer is slowly trusted again.
+   This stops the number from jumping far if the gyro is slightly wrong.
+5. The gyro's zero error is learned automatically while the car is still (the first time during the boot
+   animation). Until it is ready, the tag at the top of the screen reads **GYRO CAL**.
 
-Hasil tes di Wokwi:
-- Miring cepat 30°/detik → layar langsung ikut, tanpa jeda.
-- Miring sungguhan ke 30° → layar menunjukkan 30.7° (sensor 30.5°).
-- Rem keras 0.4g selama 1.5 detik → PITCH cuma bergeser 2.9°. Kalau pakai accelerometer saja: ~22°.
+Test results in Wokwi:
+- Quick tilt at 30°/second → the display follows right away, with no lag.
+- Real tilt to 30° → the display shows 30.7° (sensor 30.5°).
+- Hard braking at 0.4 g for 1.5 seconds → PITCH moves only 2.9°. Using the accelerometer alone: ~22°.
 
-Sensor dibaca ~70x per detik. Caranya, gambar dikirim ke layar per bagian dan sensor dibaca di sela-selanya.
+The sensor is read ~70 times per second. To do that, the image is sent to the display in parts and the
+sensor is read in between.
 
-## Coba sensor di Wokwi
+## Try the sensor in Wokwi
 
-Saat simulasi jalan, klik modul MPU-6050. Di Wokwi slider **Acceleration** (arah gravitasi) dan
-**Rotation** (gyro) terpisah, padahal di mobil asli keduanya berubah bersamaan:
-- Biarkan semua **Rotation = 0** saat mulai. Kalau tidak, gyro tidak bisa kalibrasi.
-- Geser **Acceleration** saja (Y = miring kiri/kanan, X = nanjak/turun): angka bergerak
-  ke sudut baru dalam beberapa detik, karena perubahan tanpa putaran gyro dianggap dorongan.
-- **Rotation itu kecepatan putar (derajat per detik), bukan sudut.** Di mobil asli, gyro cuma
-  bernilai saat mobil *sedang* bergerak miring, lalu kembali 0 saat sudah diam miring.
-  Kalau slider Rotation dibiarkan di angka tertentu, artinya "mobil terus berguling tanpa henti",
-  yang tidak pernah terjadi. Hasilnya angka tertahan di sekitar **1.5 x nilai Rotation**
-  (contoh Rotation 5 → sekitar 7.5°), karena gyro dan accelerometer saling tarik.
-- Cara benar meniru miring pakai gyro: geser Rotation sebentar (misalnya 30 selama 1 detik),
-  lalu kembalikan ke 0, sambil Acceleration digeser ke sudut tujuan.
-- Supaya mirip mobil asli, geser keduanya bersamaan.
+While the simulation runs, click the MPU-6050 module. In Wokwi the **Acceleration** (direction of gravity)
+and **Rotation** (gyro) sliders are separate, while in a real car both change together:
+- Keep all **Rotation = 0** at the start. Otherwise the gyro cannot calibrate.
+- Move only **Acceleration** (Y = tilt left/right, X = uphill/downhill): the number moves to the new angle
+  within a few seconds, because a change without gyro rotation is treated as a push.
+- **Rotation is rotation speed (degrees per second), not an angle.** In a real car the gyro only reads a
+  value while the car is *moving* into a tilt, then goes back to 0 once it sits still at that tilt.
+  Leaving the Rotation slider at a fixed number means "the car keeps rolling forever", which never happens.
+  The result is a number stuck around **1.5 × the Rotation value** (example: Rotation 5 → about 7.5°),
+  because the gyro and accelerometer pull against each other.
+- The right way to fake a tilt with the gyro: move Rotation briefly (for example 30 for 1 second),
+  then back to 0, while moving Acceleration to the target angle.
+- To act like a real car, move both together.
 
-| Mau simulasi | Acc X | Acc Y | Acc Z |
+| To simulate | Acc X | Acc Y | Acc Z |
 |---|---|---|---|
-| Datar | 0 | 0 | 1 |
-| Miring kanan ~30° | 0 | 0.5 | 0.87 |
-| Nanjak ~20° | 0.34 | 0 | 0.94 |
+| Level | 0 | 0 | 1 |
+| Tilt right ~30° | 0 | 0.5 | 0.87 |
+| Uphill ~20° | 0.34 | 0 | 0.94 |
 
-Lebih dari 25° angkanya berkedip sebagai peringatan.
+Above 25° the number blinks as a warning.
 
-## Pasang di mobil
+## Installing in the car
 
-- Arah sensor yang dipakai kode: **X ke depan mobil, Y ke kiri, Z ke atas**.
-  Kalau modul dipasang dengan arah lain, tukar sumbunya di fungsi `mpuUpdate()`.
-- Setelah dipasang, parkir di tempat datar, buka KEMIRINGAN, **tahan knob 1 detik**.
-- Biarkan mobil diam beberapa detik setelah dinyalakan supaya gyro sempat kalibrasi.
-- Yang belum ada dibanding versi pabrik: koreksi pakai kecepatan roda. Rem atau gas yang
-  sangat lama (lebih dari beberapa detik) masih bisa menggeser angka sedikit.
+- Sensor axes used by the code: **X toward the front of the car, Y to the left, Z up**.
+  If the module is mounted another way, swap the axes in `mpuUpdate()`.
+- After mounting, park on level ground, open TILT, and **hold the knob for 1 second**.
+- Let the car sit still for a few seconds after power-on so the gyro can calibrate.
+- Not yet included compared to the factory version: correction using wheel speed. Very long braking or
+  accelerating (more than a few seconds) can still shift the number slightly.
 
-## Ubah sendiri
+## Customizing
 
-- Lama diam sebelum pindah ke jam: `IDLE_TO_CLOCK_MS` (20000 = 20 detik).
-- Isi menu: array `MENU`.
-- Tema dan bahasa bawaan untuk ESP32 yang belum pernah disetel: `THEME_CLEAN` dan `LANG_ID` di `loadSettings()`.
-- Tingkat kecerahan: `BRIGHT_PERCENT` (angka di layar) dan `BRIGHT_CONTRAST` (nilai "contrast" OLED 0–255).
-  OLED tidak bisa gelap total walau contrast 0; tingkat paling redup tergantung chip layarnya.
-  Kecerahan di preview Mac cuma tiruan (warna diredupkan).
-- Semua teks 2 bahasa ada di satu tabel `TEXTS` (cari `// ---------- Teks 2 bahasa`). Teks baru: tambah
-  nama di `enum TextId` dan satu baris di `TEXTS` dengan urutan yang sama, lalu pakai `tr(T_NAMA)`.
-  Teks Inggris dibuat pendek supaya muat 128 piksel.
-- Kode tiap tema: cari `// ---------- Tema CLEAN` dan `// ---------- Tema 80-AN`. Cyberpunk adalah
-  fungsi lama (`drawBoot`, `drawMenu`, `drawClock`, `drawTilt`). Pemilihnya ada di `drawScreen()`.
-- Lama boot: Cyberpunk `BOOT_POWER` ... `BOOT_HUD`, Clean `BOOT_CLEAN_TOTAL`, 80-an `BOOT80_*`.
-- Kekuatan glitch (Cyberpunk): `glitchFrame(amount, seed)`, `amount` 0 sampai 1.
-- Batas peringatan miring: `ROLL_WARN` dan `PITCH_WARN` (derajat).
-- Jam mode malam: `NIGHT_START_H` dan `NIGHT_END_H`. Pilihan tingkat malam: `NIGHT_OPTIONS`.
-- Skala G-meter: `G_FULL` (g di lingkaran luar).
-- Bunyi buzzer: `SND_CLICK`, `SND_HOLD`, `SND_WARN` (daftar `{nada Hz, lama ms}`, nada 0 = diam).
-  Pin buzzer: `PIN_BUZZER`.
-- Gambar Jimny di layar kemiringan: `JIMNY_SIDE` (60×30) dan `JIMNY_REAR` (40×41), satu baris teks per
-  baris piksel (`#` = nyala). Bisa diedit langsung per piksel. Sumber: blueprint SJ410 hardtop dari
-  getoutlines.com (lisensi Creative Commons).
+- Idle time before switching to the clock: `IDLE_TO_CLOCK_MS` (20000 = 20 seconds).
+- Menu items: the `MENU` array.
+- Default theme and language for an ESP32 that has never been set: `THEME_CLEAN` and `LANG_ID` in `loadSettings()`.
+- Brightness levels: `BRIGHT_PERCENT` (number on screen) and `BRIGHT_CONTRAST` (OLED "contrast" value 0–255).
+  An OLED cannot go fully dark even at contrast 0; the dimmest level depends on the display chip.
+- All text in both languages lives in one table, `TEXTS` (search for `// ---------- Teks 2 bahasa`). New text:
+  add a name to `enum TextId` and one row to `TEXTS` in the same order, then use `tr(T_NAME)`.
+  English text is kept short so it fits in 128 pixels.
+- Code for each theme: search for `// ---------- Tema CLEAN` and `// ---------- Tema 80-AN`. Cyberpunk uses the
+  original functions (`drawBoot`, `drawMenu`, `drawClock`, `drawTilt`). The selector is in `drawScreen()`.
+- Boot length: Cyberpunk `BOOT_POWER` … `BOOT_HUD`, Clean `BOOT_CLEAN_TOTAL`, 80s `BOOT80_*`, 3D `BOOT3D_TOTAL`.
+- Glitch strength (Cyberpunk): `glitchFrame(amount, seed)`, `amount` from 0 to 1.
+- Tilt warning limits: `ROLL_WARN` and `PITCH_WARN` (degrees).
+- Night mode hours: `NIGHT_START_H` and `NIGHT_END_H`. Night level options: `NIGHT_OPTIONS`.
+- G-meter scale: `G_FULL` (g at the outer ring).
+- Buzzer sounds: `SND_CLICK`, `SND_HOLD`, `SND_WARN` (list of `{tone Hz, length ms}`, tone 0 = silence).
+  Buzzer pin: `PIN_BUZZER`.
+- Jimny drawings on the tilt screen: `JIMNY_SIDE` (60×30) and `JIMNY_REAR` (40×41), one text line per
+  pixel row (`#` = on). They can be edited pixel by pixel. Source: SJ410 hardtop blueprint from
+  getoutlines.com (Creative Commons license).
 
-## Catatan hardware
+## Hardware notes
 
-- Layar OLED 1.3" biasanya pakai chip **SH1106**, bukan SSD1306.
-  Kalau gambar acak/geser, ganti baris `U8G2_SSD1306_...` dengan
+- 1.3" OLED displays usually use the **SH1106** chip, not the SSD1306.
+  If the image looks random or shifted, replace the `U8G2_SSD1306_...` line with
   `U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);`
-- Mau kuning seperti referensi: beli OLED versi **kuning**. Ukuran 2.42" (chip SSD1309):
+- For a yellow look, buy the **yellow** OLED version. 2.42" size (SSD1309 chip):
   `U8G2_SSD1309_128X64_NONAME0_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);`
-- Layar, MPU-6050, dan RTC berbagi jalur I2C yang sama (SDA 21, SCL 22). Alamatnya harus beda:
-  layar 0x3C, RTC 0x68, MPU-6050 **0x69**. Karena MPU-6050 bawaannya juga 0x68, **pin AD0 MPU-6050
-  wajib disambung ke 3V3** supaya pindah ke 0x69. Kalau lupa, sensor dan jam bentrok.
+- The display, MPU-6050, and RTC share the same I2C bus (SDA 21, SCL 22). Their addresses must differ:
+  display 0x3C, RTC 0x68, MPU-6050 **0x69**. Because the MPU-6050 also defaults to 0x68, **the MPU-6050 AD0
+  pin must be wired to 3V3** to move it to 0x69. If you forget, the sensor and the clock clash.
 
 ### Buzzer
-- Pakai buzzer **PASIF** (bisa beda nada). Buzzer aktif cuma bisa satu nada dan akan bunyi aneh.
-  Cara cek: buzzer aktif biasanya ada stiker dan bagian bawahnya tertutup; buzzer pasif bawahnya
-  terlihat papan hijau. Atau colok ke 3V3: buzzer aktif langsung bunyi, pasif cuma "tek".
-- Untuk prototipe di meja, buzzer piezo kecil boleh langsung ke GPIO 25 lewat resistor 100Ω.
-- Untuk di mobil (biar cukup keras di atas suara mesin), pakai transistor NPN (S8050 / 2N2222):
-  GPIO 25 → resistor 1kΩ → basis; emitor ke GND; buzzer antara 3V3/5V dan kolektor; plus dioda
-  1N4148 terbalik di kaki buzzer kalau buzzernya jenis magnetik (bukan piezo).
-- Di Wokwi pakai `wokwi-buzzer`, suaranya keluar dari browser.
+- Use a **PASSIVE** buzzer (can play different tones). An active buzzer plays only one tone and will sound odd.
+  How to tell: an active buzzer usually has a sticker and a sealed bottom; a passive buzzer shows a green
+  board underneath. Or connect it to 3V3: an active buzzer beeps right away, a passive one only clicks.
+- For a desk prototype, a small piezo buzzer can go straight to GPIO 25 through a 100Ω resistor.
+- In the car (loud enough over the engine), use an NPN transistor (S8050 / 2N2222):
+  GPIO 25 → 1kΩ resistor → base; emitter to GND; buzzer between 3V3/5V and the collector; plus a reversed
+  1N4148 diode across the buzzer if it is a magnetic type (not piezo).
+- Wokwi uses `wokwi-buzzer`, and the sound plays in the browser.
 
-### Jam (RTC DS3231, modul ZS-042)
-- Jam dibaca dari RTC saat menyala, lalu disamakan lagi tiap menit. Kalau RTC tidak ketemu, jam mulai
-  dari waktu compile, dan layar ATUR JAM menulis "RTC TIDAK ADA".
-- **Baterai koin:** modul ZS-042 punya rangkaian pengisi untuk baterai isi ulang. Pakai **LIR2032**.
-  Kalau pakai **CR2032** (tidak bisa diisi ulang), **lepas resistor 200Ω** (atau diodanya) di modul,
-  supaya CR2032 tidak "dicas" (bisa bocor/menggembung).
-- **Daya:** baterai koin sudah menjaga jam tetap jalan saat mobil mati (DS3231 cuma butuh ~3 µA).
-  Saran saya: VCC modul dari **3V3 ESP32**, sama seperti komponen lain. Kalau VCC RTC diberi listrik
-  terus dari BATT+ sementara ESP32 mati, listrik bisa bocor lewat resistor pull-up I2C di modul ke
-  ESP32 yang sedang mati. Kalau tetap mau dari BATT+ (12V), wajib pakai regulator ke 3.3V, dan pull-up
-  I2C di modul sebaiknya dilepas.
-- Taruh modul di tempat yang gampang dijangkau, untuk ganti baterai koin.
-- Di Wokwi tidak ada DS3231, jadi `diagram.json` memakai **DS1307**. Register jamnya sama, jadi kodenya
-  sama. Wokwi mengisi jam DS1307 dengan jam komputer saat simulasi mulai.
+### Clock (RTC DS3231, ZS-042 module)
+- The time is read from the RTC at power-on, then synced again every minute. If no RTC is found, the clock
+  starts from the compile time, and the SET CLOCK screen shows "NO RTC".
+- **Coin cell:** the ZS-042 module has a charging circuit for rechargeable cells. Use an **LIR2032**.
+  If you use a **CR2032** (not rechargeable), **remove the 200Ω resistor** (or its diode) on the module,
+  so the CR2032 is not "charged" (it can leak or swell).
+- **Power:** the coin cell already keeps the clock running while the car is off (the DS3231 needs only ~3 µA).
+  Recommended: power the module's VCC from the **ESP32 3V3**, like the other parts. If the RTC's VCC stays
+  powered from BATT+ while the ESP32 is off, current can leak through the module's I2C pull-up resistors into
+  the unpowered ESP32. If you still want BATT+ (12V), a regulator down to 3.3V is required, and the module's
+  I2C pull-ups should be removed.
+- Mount the module somewhere easy to reach, so the coin cell can be replaced.
+- Wokwi has no DS3231, so `diagram.json` uses a **DS1307**. The time registers are the same, so the code is
+  the same. Wokwi fills the DS1307 clock with the computer's time when the simulation starts.
 
 ## Wiring
 
-| Komponen | Pin | ESP32 |
+| Part | Pin | ESP32 |
 |---|---|---|
 | OLED | SDA | GPIO 21 |
 | OLED | SCL | GPIO 22 |
@@ -297,12 +270,12 @@ Lebih dari 25° angkanya berkedip sebagai peringatan.
 | MPU-6050 | SDA | GPIO 21 |
 | MPU-6050 | SCL | GPIO 22 |
 | MPU-6050 | VCC / GND | 3V3 / GND |
-| MPU-6050 | **AD0** | **3V3** (alamat jadi 0x69) |
+| MPU-6050 | **AD0** | **3V3** (address becomes 0x69) |
 | RTC DS3231 | SDA | GPIO 21 |
 | RTC DS3231 | SCL | GPIO 22 |
-| RTC DS3231 | VCC / GND | 3V3 / GND (lihat catatan daya di atas) |
+| RTC DS3231 | VCC / GND | 3V3 / GND (see the power note above) |
 | KY-040 | CLK | GPIO 18 |
 | KY-040 | DT | GPIO 19 |
 | KY-040 | SW | GPIO 5 |
 | KY-040 | + / GND | 3V3 / GND |
-| Buzzer pasif | + / − | GPIO 25 (lewat resistor/transistor) / GND |
+| Passive buzzer | + / − | GPIO 25 (through a resistor/transistor) / GND |
