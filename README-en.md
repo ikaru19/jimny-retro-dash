@@ -3,7 +3,8 @@
 **English** | [한국어](README.md)
 
 A digital display for the Suzuki Jimny dashboard, running on an ESP32 with a 128×64 OLED.
-Version v0.4: boot animation, menu, clock, inclinometer (MPU-6050), G-meter, and buzzer feedback, with 4 themes:
+Version v0.4: boot animation, menu, clock, inclinometer (MPU-6050), G-meter, buzzer feedback, and iPhone
+"now playing" over Bluetooth, with 4 themes:
 **Clean** (default), **Cyberpunk**, **80s**, and **3D**, and 2 languages: **Indonesian** (default) and **English**.
 Tested in a Mac preview and compiled for the ESP32.
 
@@ -14,9 +15,11 @@ Tested in a Mac preview and compiled for the ESP32.
 | **Final check in the ESP32 simulator** | `./build-esp32.sh`, then in VS Code: `Cmd+Shift+P` → **Wokwi: Start Simulator** | ~16 s |
 | **Upload to a real ESP32** | `./build-esp32.sh upload` | |
 | **Test one part at a time** | `./test.sh 01` … `./test.sh 05` (see [Component tests](#component-tests)) | |
+| **Control the real dash from the Mac** | `./remote.py` (see [USB remote](#usb-remote)) | |
 
 Both scripts use [arduino-cli](https://arduino.github.io/arduino-cli/) with the `esp32:esp32` core and the
-`U8g2` library (`arduino-cli lib install U8g2`).
+`U8g2` library (`arduino-cli lib install U8g2`). `build-esp32.sh` uses the **Huge APP** partition scheme
+(3 MB for the program, no OTA), because Bluetooth and the Korean/Japanese/Chinese fonts do not fit in the default 1.2 MB.
 
 Day to day, the design work (animations, drawings, menus) happens in a Mac preview that rebuilds and
 restarts about 2 seconds after each save of `sketch.ino`. The Mac preview (`preview.sh` and `desktop/`)
@@ -34,6 +37,7 @@ then sign in in the browser. Only once.
 | `tests/` | 5 small test programs, one per component |
 | `test.sh` | Uploads a test and opens the Serial Monitor |
 | `build-esp32.sh` | Compile / upload for the ESP32 |
+| `remote.py` | Control the dash from the Mac keyboard over USB |
 | `diagram.json` | Circuit for Wokwi (online and VS Code) |
 | `wokwi.toml` | Connects Wokwi for VS Code to the compiled firmware |
 | `libraries.txt` | Libraries for Wokwi online |
@@ -61,6 +65,10 @@ Build the prototype one part at a time and test each part before adding the next
 4. **Library Manager** tab > **+** button > search `U8g2` > click it.
 5. Click the green ▶ button. Wait for the compile (the free queue can take 20–60 seconds).
 
+Note: Wokwi only has the SSD1306 display, so swap the two display lines at the top of `sketch.ino`.
+Wokwi online also uses the default 1.2 MB partition, which is now too small. If the compile fails,
+use Wokwi for VS Code with `./build-esp32.sh` instead.
+
 ## Using the knob
 
 Screen names below are in English. With the default language (Indonesian) they read
@@ -82,6 +90,7 @@ JAM, KEMIRINGAN, SETELAN, and so on.
 | On 4WD | Turn = move the lever (2H / 4H / 4L), click = shift. Click on the current mode or hold = back |
 | On RACE | Turn = steer. Click or hold = back to the menu |
 | During the TILT! warning | Click = go straight to the TILT screen |
+| On MUSIC (iPhone connected) | Turn right = next song, turn left = previous song, click = play/pause, hold = menu |
 
 In Wokwi: click the small arrows next to the knob to turn it, click the middle of the knob to press,
 and keep the click held to "hold".
@@ -99,6 +108,7 @@ Each screen's style depends on the theme (see **Themes** below). The flow is the
 4. **Idle for 20 seconds** on the menu, a "coming soon" screen, or SETTINGS → switches to **CLOCK** automatically.
    The TILT screen never switches by itself, because it is used while driving.
 5. **CLOCK**: big clock. Turn or click to go back to the menu.
+   While an iPhone is connected over Bluetooth, the clock screen becomes the **MUSIC** screen (see below).
 6. **TILT**: like a factory inclinometer. Left = **side view** (PITCH, front of the car facing left),
    right = **rear view** (ROLL). The Jimny silhouette is taken straight from an SJ410 hardtop blueprint
    (same body as the JA11) and rotated to the angle, on top of ground that tilts with it.
@@ -142,6 +152,37 @@ speed and distance. The track is `TRACK` (list of `{length, curve}`); feel: `RAC
 **Buzzer:** every knob click gives a short "beep" (2700 Hz, 18 ms); holding the knob gives a lower one
 (1500 Hz, 60 ms). While the tilt warning is shown, a "beep-beep ... beep-beep" alarm keeps sounding until
 the car is safe again. Clicks during a screen transition make no sound (those clicks are ignored).
+
+## Bluetooth: iPhone now playing
+
+The dash shows up on the iPhone as **JIMNY DASH**. Pair it once in **Settings → Bluetooth** (tap "Pair",
+no PIN). After that the iPhone reconnects by itself a few seconds after the dash turns on.
+
+- **No extra menu.** While the iPhone is connected, the idle screen (CLOCK) becomes **MUSIC**:
+  small clock, song time, play/pause icon, title, artist, and a progress bar. When it disconnects, it goes back
+  to the normal clock.
+- **Knob:** turn = next / previous song, click = play/pause, hold = menu.
+- **All letters:** titles and artists show Latin (with accents), Korean, Japanese, and Chinese letters.
+  Each line picks its own 12 px font from the letters in it. Long lines scroll. Emoji and very rare letters are left out.
+- **iPhone clock:** each time the iPhone connects, the dash sets its clock (and the RTC, if there is one) from the
+  iPhone's time, down to the second. So the clock is right even without an RTC.
+- Uses the Apple Media Service (AMS) and Current Time Service over Bluetooth Low Energy. Sound still plays
+  from the phone or the car stereo; the dash only shows and controls it. Android is not supported yet.
+- In the Mac preview, a fake phone "connects" after 1.5 seconds with demo songs in several languages.
+
+## USB remote
+
+Handy while the knob is not wired yet or broken. With the ESP32 plugged into the Mac, run `./remote.py`
+(standard Python, no extra packages). Close the Serial Monitor first.
+
+| Key | Does |
+|---|---|
+| ← / → (or A / D) | Turn the knob |
+| Space / Enter | Click |
+| H | Hold |
+| Q | Quit |
+
+It also shows what the ESP32 prints. Any serial monitor works too: send `L`, `R`, `C`, or `H`.
 
 ## Themes
 
@@ -251,9 +292,8 @@ Above 25° the number blinks as a warning.
 
 ## Hardware notes
 
-- 1.3" OLED displays usually use the **SH1106** chip, not the SSD1306.
-  If the image looks random or shifted, replace the `U8G2_SSD1306_...` line with
-  `U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);`
+- The code uses the **SH1106** chip, which most 1.3" OLED displays have. For a 0.96" SSD1306 display
+  (or Wokwi), swap the two display lines at the top of `sketch.ino`.
 - For a yellow look, buy the **yellow** OLED version. 2.42" size (SSD1309 chip):
   `U8G2_SSD1309_128X64_NONAME0_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);`
 - The display, MPU-6050, and RTC share the same I2C bus (SDA 21, SCL 22). Their addresses must differ:
@@ -273,6 +313,7 @@ Above 25° the number blinks as a warning.
 ### Clock (RTC DS3231, ZS-042 module)
 - The time is read from the RTC at power-on, then synced again every minute. If no RTC is found, the clock
   starts from the compile time, and the SET CLOCK screen shows "NO RTC".
+  When an iPhone connects over Bluetooth, the clock and the RTC are set from the iPhone's time.
 - **Coin cell:** the ZS-042 module has a charging circuit for rechargeable cells. Use an **LIR2032**.
   If you use a **CR2032** (not rechargeable), **remove the 200Ω resistor** (or its diode) on the module,
   so the CR2032 is not "charged" (it can leak or swell).
