@@ -51,6 +51,15 @@ enum ButtonEvent { BTN_NONE, BTN_CLICK, BTN_HOLD };
 enum Lang { LANG_ID, LANG_EN, LANG_COUNT };
 enum DriveMode { DRIVE_2H, DRIVE_4H, DRIVE_4L, DRIVE_COUNT };  // 4WD screen (just for fun: not wired to the car)
 struct Beep { uint16_t freq; uint16_t ms; };
+// iPhone notification or call (see NOTIFICATIONS)
+struct Notif {
+  uint32_t uid = 0;                           // the phone's number for this notification
+  bool call = false;                          // incoming call: answer / decline instead of reading
+  bool canAnswer = false, canDecline = false;
+  char app[32] = "";                          // app name, e.g. "WhatsApp"
+  char title[96] = "";                        // sender or subject
+  char msg[300] = "";
+};
 struct Flip { char shown[4]; char prev[4]; uint32_t at; };  // one clock digit that can flip over (3D theme)
 struct V3 { float x, y, z; };                                // 3D point
 const int MESH_MAX_V = 64, MESH_MAX_E = 100;
@@ -67,7 +76,7 @@ enum TextId {
   T_SET_CLOCK, T_HOUR, T_MINUTE, T_CLICK_NEXT, T_CLICK_SAVE, T_NO_RTC,
   T_BRIGHTNESS, T_HOLD_CANCEL,
   T_GMETER, T_BRAKE, T_ACCEL, T_TURN, T_NOW, T_TILT_WARN, T_CLICK_VIEW, T_NIGHT, T_OFF,
-  T_4WD, T_ENGAGED, T_RACE, T_OFFROAD, T_ABOUT, T_MUSIC,
+  T_4WD, T_ENGAGED, T_RACE, T_OFFROAD, T_ABOUT, T_MUSIC, T_CALL, T_DECLINE, T_ANSWER,
   T_COUNT
 };
 
@@ -142,6 +151,9 @@ const char* const TEXTS[][LANG_COUNT] = {
   { "KELUAR JALUR", "OFF ROAD" },    // T_OFFROAD
   { "TENTANG", "ABOUT" },            // T_ABOUT
   { "MUSIK", "MUSIC" },              // T_MUSIC
+  { "PANGGILAN MASUK", "INCOMING CALL" },  // T_CALL
+  { "TOLAK", "DECLINE" },            // T_DECLINE
+  { "ANGKAT", "ANSWER" },            // T_ANSWER
 };
 static_assert(sizeof(TEXTS) / sizeof(TEXTS[0]) == T_COUNT, "TEXTS table must have 1 row for each TextId");
 
@@ -2702,9 +2714,51 @@ bool musicActive(uint32_t now) {
   return musicPlayedAt && now - musicPlayedAt < MUSIC_KEEP_MS;
 }
 
-// Copy text from the phone (UTF-8). Control characters become spaces, and a letter cut in half at the end
-// (the phone limits how long one update can be) is dropped.
-void musicCopyText(char* dst, size_t size, const uint8_t* src, size_t len) {
+// Notifications and calls from the iPhone (Apple Notification Center Service). The Bluetooth task puts new ones
+// in a short queue; the main loop shows them one at a time on top of whatever screen is open.
+const int NOTIF_QUEUE = 4;
+Notif notifQueue[NOTIF_QUEUE];  // waiting to be shown (protected by musicMux)
+int notifQueued = 0;
+uint32_t notifGone[4];          // removed on the phone (call answered there, message read), for the main loop
+int notifGoneCount = 0;
+Notif notifShown;        // the one on screen (main loop only)
+bool notifOpen = false;
+
+// Add one (Bluetooth task). Calls jump the queue; when the queue is full the oldest one is dropped.
+void notifPush(const Notif& n) {
+  portENTER_CRITICAL(&musicMux);
+  if (notifQueued == NOTIF_QUEUE) {
+    memmove(&notifQueue[0], &notifQueue[1], sizeof(Notif) * (NOTIF_QUEUE - 1));
+    notifQueued--;
+  }
+  if (n.call) {
+    memmove(&notifQueue[1], &notifQueue[0], sizeof(Notif) * notifQueued);
+    notifQueue[0] = n;
+  } else {
+    notifQueue[notifQueued] = n;
+  }
+  notifQueued++;
+  portEXIT_CRITICAL(&musicMux);
+}
+
+// The phone removed a notification: drop it from the queue, and tell the main loop in case it is on screen
+void notifRemoved(uint32_t uid) {
+  portENTER_CRITICAL(&musicMux);
+  for (int i = 0; i < notifQueued;) {
+    if (notifQueue[i].uid == uid) {
+      memmove(&notifQueue[i], &notifQueue[i + 1], sizeof(Notif) * (notifQueued - i - 1));
+      notifQueued--;
+    } else {
+      i++;
+    }
+  }
+  if (notifGoneCount < 4) notifGone[notifGoneCount++] = uid;
+  portEXIT_CRITICAL(&musicMux);
+}
+
+// Copy text from the phone (UTF-8). Control characters become spaces (line breaks stay if keepLines), and a
+// letter cut in half at the end (the phone limits how long one update can be) is dropped.
+void musicCopyText(char* dst, size_t size, const uint8_t* src, size_t len, bool keepLines) {
   size_t n = 0;
   for (size_t i = 0; i < len && n + 1 < size;) {
     uint8_t c = src[i];
@@ -2714,7 +2768,7 @@ void musicCopyText(char* dst, size_t size, const uint8_t* src, size_t len) {
       continue;
     }
     if (i + k > len || n + k + 1 > size) break;  // incomplete letter
-    if (k == 1) dst[n++] = c >= 32 ? c : ' ';
+    if (k == 1) dst[n++] = c >= 32 || (keepLines && c == '\n') ? c : ' ';
     else
       for (int j = 0; j < k; j++) dst[n++] = src[i + j];
     i += k;
@@ -2760,6 +2814,172 @@ int musicMissing(const uint8_t* font, const char* s) {
 #include <BLEDevice.h>
 #include <BLESecurity.h>
 
+// Apple Notification Center Service: the iPhone sends a short event for each notification; the dash then asks
+// for its app, title, and text, which arrive (sometimes in pieces) on the data source. Calls can be answered here.
+// The requests wait for the phone, so they run in the connection task, never in a Bluetooth callback.
+struct Ancs {
+  static constexpr const char* SERVICE = "7905F431-B5CE-4E99-A40F-4B1E122D00D0";
+  static constexpr const char* SOURCE = "9FBF120D-6301-42D9-8C58-25E699A21DBD";   // events: added / removed
+  static constexpr const char* CONTROL = "69D1D8F3-45E1-49A8-9821-9BBDFDAAD9D9";  // ask for details, answer / decline
+  static constexpr const char* DATA = "22EAC6E9-24D6-4BB5-BE44-B36ACE7C7BFB";     // details arrive here
+  struct Job {
+    uint8_t kind;  // 0 = fetch details, 1 = answer (action 0) / decline (action 1)
+    uint32_t uid;
+    uint8_t flags, category, action;
+  };
+  struct AppName {
+    char id[48];
+    char name[32];
+  };
+  static QueueHandle_t jobs;
+  static SemaphoreHandle_t more;  // given each time a piece of data arrives
+  static BLERemoteCharacteristic* control;
+  static uint8_t buf[640];
+  static volatile int bufLen;
+  static AppName names[8];  // app id -> name the phone showed, so each app is asked only once
+  static int nextName;
+  static uint32_t subscribedAt;
+
+  // Event = { event, flags, category, category count, uid (4 bytes) }. Event 0 = added, 2 = removed.
+  static void onSource(BLERemoteCharacteristic* c, uint8_t* d, size_t len, bool isNotify) {
+    if (len < 8) return;
+    uint8_t event = d[0], flags = d[1], category = d[2];
+    uint32_t uid = d[4] | d[5] << 8 | d[6] << 16 | (uint32_t)d[7] << 24;
+    if (event == 2) notifRemoved(uid);
+    if (event != 0 || (flags & 4)) return;  // only new ones, not those already on the phone when it connected
+    if (millis() - subscribedAt < 5000) return;  // right after connecting the phone also replays recent ones
+    Job j = { 0, uid, flags, category, 0 };
+    xQueueSend(jobs, &j, 0);
+  }
+
+  static void onData(BLERemoteCharacteristic* c, uint8_t* d, size_t len, bool isNotify) {
+    int n = min((int)len, (int)sizeof(buf) - bufLen);
+    memcpy(buf + bufLen, d, n);
+    bufLen += n;
+    xSemaphoreGive(more);
+  }
+
+  // Attribute = { id, length (2 bytes), value }. False when it has not fully arrived yet.
+  static bool attr(int& p, int len, uint8_t& id, const uint8_t*& val, int& vlen) {
+    if (p + 3 > len) return false;
+    id = buf[p];
+    vlen = buf[p + 1] | buf[p + 2] << 8;
+    if (p + 3 + vlen > len) return false;
+    val = buf + p + 3;
+    p += 3 + vlen;
+    return true;
+  }
+
+  // Send a request and wait until 'count' attributes (starting at byte 'start') are in buf
+  static bool request(uint8_t* cmd, int cmdLen, int start, int count) {
+    bufLen = 0;
+    xSemaphoreTake(more, 0);
+    control->writeValue(cmd, cmdLen, true);
+    for (;;) {
+      if (xSemaphoreTake(more, pdMS_TO_TICKS(2000)) != pdTRUE) return false;  // the phone did not answer
+      int p = start, vlen, k = 0;
+      uint8_t id;
+      const uint8_t* v;
+      while (k < count && attr(p, bufLen, id, v, vlen)) k++;
+      if (k == count) return true;
+    }
+  }
+
+  // App name as the phone shows it ("WhatsApp", "카카오톡"); falls back to the end of the app id
+  static void appName(const char* id, char* out, size_t size) {
+    for (auto& a : names)
+      if (a.id[0] && !strcmp(a.id, id)) {
+        strlcpy(out, a.name, size);
+        return;
+      }
+    const char* dot = strrchr(id, '.');
+    strlcpy(out, dot ? dot + 1 : id, size);
+    int n = strlen(id);
+    if (!n || n >= (int)sizeof(names[0].id)) return;
+    uint8_t cmd[52] = { 1 };  // get app attributes: { 1, app id, 0, attribute 0 = display name }
+    memcpy(cmd + 1, id, n + 1);
+    cmd[n + 2] = 0;
+    if (!request(cmd, n + 3, n + 2, 1)) return;
+    int p = n + 2, vlen;
+    uint8_t aid;
+    const uint8_t* v;
+    if (attr(p, bufLen, aid, v, vlen) && vlen) musicCopyText(out, size, v, vlen, false);
+    AppName& a = names[nextName++ % 8];
+    strlcpy(a.id, id, sizeof(a.id));
+    strlcpy(a.name, out, sizeof(a.name));
+  }
+
+  static void fetch(const Job& j) {
+    Notif n;
+    n.uid = j.uid;
+    n.call = j.category == 1;  // 1 = incoming call
+    n.canAnswer = j.flags & 8;
+    n.canDecline = j.flags & 16;
+    // { 0, uid, attribute 0 = app id, 1 = title (max length), 3 = message (max length) }
+    uint8_t cmd[] = { 0, (uint8_t)j.uid, (uint8_t)(j.uid >> 8), (uint8_t)(j.uid >> 16), (uint8_t)(j.uid >> 24),
+                      0, 1, sizeof(n.title) - 1, 0, 3, (sizeof(n.msg) - 1) & 0xFF, (sizeof(n.msg) - 1) >> 8 };
+    if (!request(cmd, sizeof(cmd), 5, 3)) return;
+    char appId[48] = "";
+    int p = 5, vlen;
+    uint8_t id;
+    const uint8_t* v;
+    while (attr(p, bufLen, id, v, vlen)) {
+      if (id == 0) musicCopyText(appId, sizeof(appId), v, vlen, false);
+      if (id == 1) musicCopyText(n.title, sizeof(n.title), v, vlen, false);
+      if (id == 3) musicCopyText(n.msg, sizeof(n.msg), v, vlen, true);
+    }
+    appName(appId, n.app, sizeof(n.app));
+    notifPush(n);
+    Serial.printf("Notify: %s%s: %s\n", n.call ? "call from " : "", n.app, n.title);
+  }
+
+  // Subscribe on this connection (data source first, as Apple asks). False when the phone does not share them.
+  static bool begin(BLEClient* client) {
+    if (!jobs) {
+      jobs = xQueueCreate(8, sizeof(Job));
+      more = xSemaphoreCreateBinary();
+    }
+    xQueueReset(jobs);
+    BLERemoteService* svc = client->getService(SERVICE);
+    BLERemoteCharacteristic* src = svc ? svc->getCharacteristic(SOURCE) : nullptr;
+    BLERemoteCharacteristic* data = svc ? svc->getCharacteristic(DATA) : nullptr;
+    control = svc ? svc->getCharacteristic(CONTROL) : nullptr;
+    if (!src || !data || !control) {
+      control = nullptr;
+      Serial.println("Notify: iPhone does not share notifications (Bluetooth > JIMNY DASH > Share System Notifications)");
+      return false;
+    }
+    subscribedAt = millis();
+    data->registerForNotify(onData);
+    src->registerForNotify(onSource);
+    Serial.println("Notify: iPhone notifications on");
+    return true;
+  }
+
+  // Work through fetch / answer requests until the phone disconnects
+  static void run(BLEClient* client) {
+    Job j;
+    while (client->isConnected()) {
+      if (xQueueReceive(jobs, &j, pdMS_TO_TICKS(1000)) != pdTRUE || !control) continue;
+      if (j.kind == 0) {
+        fetch(j);
+      } else {
+        uint8_t cmd[] = { 2, (uint8_t)j.uid, (uint8_t)(j.uid >> 8), (uint8_t)(j.uid >> 16), (uint8_t)(j.uid >> 24), j.action };
+        control->writeValue(cmd, sizeof(cmd), true);
+      }
+    }
+    control = nullptr;
+  }
+};
+QueueHandle_t Ancs::jobs = nullptr;
+SemaphoreHandle_t Ancs::more = nullptr;
+BLERemoteCharacteristic* Ancs::control = nullptr;
+uint8_t Ancs::buf[640];
+volatile int Ancs::bufLen = 0;
+Ancs::AppName Ancs::names[8];
+int Ancs::nextName = 0;
+uint32_t Ancs::subscribedAt = 0;
+
 // Apple Media Service: the iPhone is the server, the dash reads from it over the same connection
 struct Ams {
   static constexpr const char* SERVICE = "89D3502B-0F36-433A-8EF4-C502AD55F8DC";
@@ -2774,7 +2994,7 @@ struct Ams {
     if (len < 3) return;
     uint8_t entity = d[0], attr = d[1];
     char buf[sizeof(music.title)];
-    musicCopyText(buf, sizeof(buf), d + 3, len - 3);
+    musicCopyText(buf, sizeof(buf), d + 3, len - 3, false);
     portENTER_CRITICAL(&musicMux);
     if (entity == 2 && attr == 0) strlcpy(music.artist, buf, sizeof(music.artist));
     if (entity == 2 && attr == 2) {
@@ -2831,6 +3051,7 @@ struct Ams {
           Serial.printf("Clock: time from iPhone %02d:%02d:%02d\n", phoneH, phoneM, phoneS);
         }
       }
+      if (Ancs::begin(client)) Ancs::run(client);  // stays here until the phone disconnects
     }
     vTaskDelete(nullptr);
   }
@@ -2844,7 +3065,7 @@ class AmsServerCallbacks : public BLEServerCallbacks {
     memcpy(Ams::peer, p->connect.remote_bda, 6);
     Serial.println("Music: phone connected, asking for media info...");
     BLESecurity::startSecurity(p->connect.remote_bda);  // iPhone only shares media info over an encrypted link
-    xTaskCreate(Ams::setupTask, "ams", 6144, nullptr, 1, nullptr);
+    xTaskCreate(Ams::setupTask, "ams", 8192, nullptr, 1, nullptr);
   }
   void onDisconnect(BLEServer* s, esp_ble_gatts_cb_param_t* p) override {
     music.connected = false;
@@ -2869,6 +3090,9 @@ void musicBegin() {
   adv.addData((char*)solicit, sizeof(solicit));
   adv.setShortName("JIMNY");  // short name in the main packet (31-byte limit), full name in the scan response
   scan.setName("JIMNY DASH");
+  // ... and Apple Notification Center Service in the scan response (no room left in the main packet)
+  uint8_t solicitAncs[18] = { 17, 0x15, 0xD0, 0x00, 0x2D, 0x12, 0x1E, 0x4B, 0x0F, 0xA4, 0x99, 0x4E, 0xCE, 0xB5, 0x31, 0xF4, 0x05, 0x79 };
+  scan.addData((char*)solicitAncs, sizeof(solicitAncs));
   BLEAdvertising* a = BLEDevice::getAdvertising();
   a->setAdvertisementData(adv);
   a->setScanResponseData(scan);
@@ -2878,6 +3102,12 @@ void musicBegin() {
 
 void musicCommand(uint8_t cmd) {
   if (Ams::remote) Ams::remote->writeValue(cmd, true);
+}
+
+// Answer (positive = true) or decline a call. Sent from the connection task, which may be busy for a moment.
+void notifAction(uint32_t uid, bool positive) {
+  Ancs::Job j = { 1, uid, 0, 0, (uint8_t)(positive ? 0 : 1) };
+  if (Ancs::jobs) xQueueSend(Ancs::jobs, &j, 0);
 }
 
 void musicUpdate(uint32_t now) {
@@ -2903,12 +3133,41 @@ void musicBegin() {
   music.infoAt = millis();
 }
 
+// Demo notifications: { time ms, app, title, message }; an empty message = incoming call, ended at the next step
+const char* const DEMO_NOTIFS[][4] = {
+  { "8000", "WhatsApp", "Ibu", "Nak, nanti pulang jam berapa? Jangan lupa beli galon ya, sama telur sekilo.\nHati-hati di jalan." },
+  { "26000", "카카오톡", "지민", "오늘 저녁에 같이 밥 먹을래? 7시에 강남역 어때?" },
+  { "40000", "Phone", "Mama", "" },
+  { "52000", "", "", "" },
+};
+int demoNotif = 0;
+
 void musicUpdate(uint32_t now) {
   music.connected = now > 1500;  // "pairs" shortly after power-on
   if (!music.playing && now > 4000 && now < 5000) {  // starts playing a moment later
     music.playing = true;
     music.infoAt = now;
   }
+  if (demoNotif < 4 && now > (uint32_t)atoi(DEMO_NOTIFS[demoNotif][0])) {
+    const char* const* d = DEMO_NOTIFS[demoNotif++];
+    if (!d[1][0]) {
+      notifRemoved(100 + demoNotif - 2);  // the call ends (answered or hung up on the phone)
+      return;
+    }
+    Notif n;
+    n.uid = 100 + demoNotif - 1;
+    n.call = !d[3][0];
+    n.canAnswer = n.canDecline = n.call;
+    strlcpy(n.app, d[1], sizeof(n.app));
+    strlcpy(n.title, d[2], sizeof(n.title));
+    strlcpy(n.msg, d[3], sizeof(n.msg));
+    notifPush(n);
+  }
+}
+
+void notifAction(uint32_t uid, bool positive) {
+  Serial.printf("Notify: %s call %u\n", positive ? "answer" : "decline", (unsigned)uid);
+  notifRemoved(uid);
 }
 
 void musicCommand(uint8_t cmd) {
@@ -3114,6 +3373,8 @@ const Beep SND_CLICK[] = { { 2700, 18 } };                                      
 const Beep SND_SHIFT[] = { { 180, 30 }, { 0, 70 }, { 140, 45 } };                 // 4WD lever "clunk-clunk"
 const Beep SND_HOLD[] = { { 1500, 60 } };                                         // knob hold
 const Beep SND_WARN[] = { { 3000, 150 }, { 0, 90 }, { 3000, 150 }, { 0, 500 } };  // tilt, repeated
+const Beep SND_NOTIF[] = { { 1319, 70 }, { 0, 40 }, { 1760, 120 } };               // new notification "ding-dong"
+const Beep SND_RING[] = { { 1480, 80 }, { 0, 40 }, { 1480, 80 }, { 0, 40 }, { 1480, 80 }, { 0, 1500 } };  // call, repeated
 // Boot jingle: short 80s-computer chiptune (original). A quick power-up sweep, five notes that spell
 // out J-I-M-N-Y on screen, then a bright "ta-da". About 1.5 s.
 const Beep SND_BOOT[] = {
@@ -3189,9 +3450,13 @@ void stopSound() {
 }
 
 void updateSound(uint32_t now) {
+  bool ringing = notifOpen && notifShown.call;
   if (sndSeq == SND_WARN && !tiltWarn) stopSound();
-  if (sndSeq == SND_ABOUT && (tiltWarn || current != SCR_ABOUT)) stopSound();  // song only on ABOUT, alarm first
+  if (sndSeq == SND_ABOUT && (tiltWarn || ringing || current != SCR_ABOUT)) stopSound();  // song only on ABOUT, alarm first
+  if (sndSeq == SND_RING && (tiltWarn || !ringing)) stopSound();
   if (!sndSeq && tiltWarn) playSound(SND(SND_WARN), true, now);  // alarm keeps going while tilted
+  else if (!sndSeq && ringing) playSound(SND(SND_RING), true, now);
+  else if (!sndSeq && current == SCR_ABOUT && !notifOpen && !transitioning) playSound(SND(SND_ABOUT), true, now);  // song again after a ding
   if (!sndSeq || (int32_t)(now - sndStepEnd) < 0) return;
   if (++sndIdx >= sndLen) {
     if (!sndRepeat) {
@@ -3235,6 +3500,247 @@ void drawTiltWarning(uint32_t now) {
   u8g2.drawStr((W - u8g2.getStrWidth(tr(T_CLICK_VIEW))) / 2, 54, tr(T_CLICK_VIEW));
   u8g2.setDrawColor(1);
   if (theme == THEME_CYBER && (now / 90) % 7 == 0) glitchFrame(0.3f, now / 30);
+}
+
+// ---------- NOTIFICATIONS and CALLS from the iPhone (on top of every screen) ----------
+// A message: app name and time on top, then the sender and the text, wrapped. A long one scrolls by itself
+// (NOTIF_FIRST_MS, then a line every NOTIF_LINE_MS) so it can be read while driving; turning the knob stops that
+// and scrolls by hand. Click = close (the next one in the queue shows), hold = close all.
+// It closes by itself NOTIF_SHOW_MS after the knob was last touched or the text last moved.
+// A call: caller name with DECLINE / ANSWER. Turn = choose, click = do it on the phone, hold = just hide it.
+// It closes by itself when the call is answered or ends on the phone.
+const uint32_t NOTIF_SHOW_MS = 20000;
+const uint32_t NOTIF_FIRST_MS = 3000, NOTIF_LINE_MS = 2000;  // auto scroll: wait, then one line each
+const int NOTIF_TOP = 14, NOTIF_MAX_LINES = 24, NOTIF_TEXT_W = W - 6;
+struct NotifLine {
+  uint8_t part;  // 0 = title, 1 = message
+  uint16_t start, len;
+};
+NotifLine notifLines[NOTIF_MAX_LINES];
+const uint8_t* notifFonts[2];
+int notifLineCount = 0, notifScroll = 0, callPick = 1;  // callPick: 0 = decline, 1 = answer
+uint32_t notifTouchedAt = 0, notifScrollAt = 0;
+bool notifManual = false;  // knob turned: no more auto scroll
+
+int utf8Len(uint8_t c) {
+  return (c & 0xE0) == 0xC0 ? 2 : (c & 0xF0) == 0xE0 ? 3 : (c & 0xF8) == 0xF0 ? 4 : 1;
+}
+
+// Width of text[from..to) in the current font
+int textWidth(const char* text, int from, int to) {
+  char tmp[sizeof(notifShown.msg)];
+  int n = min(to - from, (int)sizeof(tmp) - 1);
+  memcpy(tmp, text + from, n);
+  tmp[n] = 0;
+  return u8g2.getUTF8Width(tmp);
+}
+
+// Break text into lines that fit the screen: at spaces when possible (Korean/Japanese/Chinese can break anywhere)
+void notifWrap(uint8_t part, const char* text, int maxLines) {
+  u8g2.setFont(notifFonts[part]);
+  int i = 0, lines = 0;
+  while (text[i] && notifLineCount < NOTIF_MAX_LINES && lines < maxLines) {
+    while (text[i] == ' ') i++;  // no space at the start of a line
+    int start = i, end = i, brk = -1;
+    while (text[end] && text[end] != '\n') {
+      int k = utf8Len(text[end]);
+      if (end > start && textWidth(text, start, end + k) > NOTIF_TEXT_W) break;
+      end += k;
+      if (text[end] == ' ') brk = end;
+    }
+    int next = end;
+    if (!text[end] || text[end] == '\n') next = end + (text[end] == '\n');
+    else if (brk > start) end = brk, next = brk + 1;  // break at the last space that fits
+    i = next;
+    if (end == start) continue;  // empty line
+    notifLines[notifLineCount++] = { part, (uint16_t)start, (uint16_t)(end - start) };
+    lines++;
+  }
+}
+
+// Row height: Korean/Japanese/Chinese letters are a full 12 px tall, so they get more room than Latin ones
+int notifLineH(int i) {
+  const uint8_t* f = notifFonts[notifLines[i].part];
+  return f == u8g2_font_helvB08_tf || f == u8g2_font_helvR08_tf ? 12 : 14;
+}
+
+// How many lines fit on screen starting at line 'from'
+int notifRowsFrom(int from) {
+  int y = NOTIF_TOP, n = 0;
+  while (from + n < notifLineCount && y + notifLineH(from + n) <= H + 1) y += notifLineH(from + n++);
+  return n;
+}
+
+// Furthest the text can scroll: the last line just fits at the bottom
+int notifMaxScroll() {
+  int s = 0;
+  while (s < notifLineCount && s + notifRowsFrom(s) < notifLineCount) s++;
+  return s;
+}
+
+// Main loop: take the next one from the queue, close one the phone removed, or one left alone too long
+void notifUpdate(uint32_t now) {
+  bool gone = false, take = false;
+  portENTER_CRITICAL(&musicMux);
+  for (int i = 0; i < notifGoneCount; i++) gone |= notifOpen && notifGone[i] == notifShown.uid;
+  notifGoneCount = 0;
+  if (notifQueued && current != SCR_BOOT && (!notifOpen || gone || (notifQueue[0].call && !notifShown.call))) {
+    notifShown = notifQueue[0];  // a call pushes a message off the screen
+    memmove(&notifQueue[0], &notifQueue[1], sizeof(Notif) * (notifQueued - 1));
+    notifQueued--;
+    take = true;
+  }
+  portEXIT_CRITICAL(&musicMux);
+  if (gone) notifOpen = false;
+  if (take) {
+    notifOpen = true;
+    notifTouchedAt = now;
+    notifScroll = notifLineCount = 0;
+    notifScrollAt = now + NOTIF_FIRST_MS;
+    notifManual = false;
+    callPick = notifShown.canAnswer ? 1 : 0;
+    notifFonts[0] = musicFont(notifShown.title);
+    notifFonts[1] = musicFont(notifShown.msg);
+    if (notifFonts[1] == u8g2_font_helvB08_tf) notifFonts[1] = u8g2_font_helvR08_tf;  // message text not bold
+    if (!notifShown.call) {
+      notifWrap(0, notifShown.title, 2);
+      notifWrap(1, notifShown.msg, NOTIF_MAX_LINES);
+      if (!tiltWarn) playSound(SND(SND_NOTIF), false, now);
+    }
+  }
+  if (notifOpen && !notifShown.call && !notifManual && (int32_t)(now - notifScrollAt) >= 0 &&
+      notifScroll < notifMaxScroll()) {
+    notifScroll++;
+    notifScrollAt = now + NOTIF_LINE_MS;
+    notifTouchedAt = now;
+  }
+  // Calls normally close when the phone removes them; this is only a safety net
+  if (notifOpen && now - notifTouchedAt > (notifShown.call ? 90000 : NOTIF_SHOW_MS)) notifOpen = false;
+}
+
+// Knob while a notification is open. True = the input was used here (the screen below gets none).
+bool notifInput(int steps, ButtonEvent btn, uint32_t now) {
+  if (!notifOpen || tiltWarn) return false;
+  if (steps || btn != BTN_NONE) notifTouchedAt = lastInputMs = now;
+  if (notifShown.call) {
+    if (steps && notifShown.canAnswer && notifShown.canDecline) callPick = constrain(callPick + steps, 0, 1);
+    if (btn == BTN_CLICK) {
+      if (callPick == 1 && notifShown.canAnswer) notifAction(notifShown.uid, true);
+      else if (notifShown.canDecline) notifAction(notifShown.uid, false);
+      notifOpen = false;
+    } else if (btn == BTN_HOLD) {
+      notifOpen = false;  // hide it; the phone keeps ringing
+    }
+  } else {
+    if (steps) {
+      notifScroll = constrain(notifScroll + steps, 0, notifMaxScroll());
+      notifManual = true;
+    }
+    if (btn != BTN_NONE) notifOpen = false;
+    if (btn == BTN_HOLD) {
+      portENTER_CRITICAL(&musicMux);
+      notifQueued = 0;
+      portEXIT_CRITICAL(&musicMux);
+    }
+  }
+  return true;
+}
+
+// Small telephone handset, 10x10
+void drawPhoneIcon(int x, int y) {
+  box(x, y, 4, 3);
+  box(x + 6, y + 7, 4, 3);
+  for (int k = 0; k < 3; k++) line(x + k, y + 3, x + 6, y + 9 - k);
+}
+
+// Header bar: dark text on a light bar
+void drawNotifBar(const char* text, const uint8_t* font, int textX, uint32_t now) {
+  box(0, 0, W, NOTIF_TOP - 1);
+  u8g2.setDrawColor(0);
+  char hm[6];
+  clockHHMM(hm);
+  u8g2.setFont(u8g2_font_5x7_tr);
+  int right = W - 2 - u8g2.getStrWidth(hm);
+  u8g2.drawStr(right, 9, hm);
+  int more = notifQueued;
+  if (more) {
+    char m[4];
+    snprintf(m, sizeof(m), "+%d", min(more, 9));
+    right -= u8g2.getStrWidth(m) + 4;
+    u8g2.drawStr(right, 9, m);
+  }
+  u8g2.setFont(font);
+  u8g2.setClipWindow(0, 0, right - 3, NOTIF_TOP - 1);
+  u8g2.drawUTF8(textX, font == u8g2_font_5x7_tr ? 9 : 12, text);
+  u8g2.setMaxClipWindow();
+  u8g2.setDrawColor(1);
+}
+
+void drawCall(uint32_t now) {
+  drawNotifBar(tr(T_CALL), u8g2_font_5x7_tr, 15, now);
+  if ((now / 250) % 2) {  // handset shakes like it is ringing
+    u8g2.setDrawColor(0);
+    drawPhoneIcon(2 + (now / 125) % 2, 2);
+    u8g2.setDrawColor(1);
+  } else {
+    u8g2.setDrawColor(0);
+    drawPhoneIcon(2, 2);
+    u8g2.setDrawColor(1);
+  }
+  // Caller name, centered (scrolls when it is too long), and the app below it
+  const char* name = notifShown.title[0] ? notifShown.title : "?";
+  u8g2.setFont(notifFonts[0]);
+  int w = u8g2.getUTF8Width(name);
+  if (w <= W - 4) u8g2.drawUTF8((W - w) / 2, 31, name);
+  else drawMusicLine(name, 31, 18, 34, W, now);
+  u8g2.setFont(musicFont(notifShown.app));
+  u8g2.drawUTF8((W - u8g2.getUTF8Width(notifShown.app)) / 2, 45, notifShown.app);
+  // DECLINE / ANSWER buttons; the chosen one is filled
+  u8g2.setFont(u8g2_font_6x10_tr);
+  const TextId labels[2] = { T_DECLINE, T_ANSWER };
+  bool shown[2] = { notifShown.canDecline, notifShown.canAnswer };
+  for (int i = 0; i < 2; i++) {
+    if (!shown[i]) continue;
+    int bx = i ? W / 2 + 1 : 2, bw = W / 2 - 3;
+    const char* s = tr(labels[i]);
+    if (i == callPick) {
+      box(bx, 51, bw, 13);
+      u8g2.setDrawColor(0);
+    } else {
+      frame(bx, 51, bw, 13);
+    }
+    u8g2.drawStr(bx + (bw - u8g2.getStrWidth(s)) / 2, 61, s);
+    u8g2.setDrawColor(1);
+  }
+}
+
+void drawNotif(uint32_t now) {
+  u8g2.setDrawColor(0);
+  box(0, 0, W, H);
+  u8g2.setDrawColor(1);
+  if (notifShown.call) {
+    drawCall(now);
+    return;
+  }
+  drawNotifBar(notifShown.app, musicFont(notifShown.app), 2, now);
+  char buf[sizeof(notifShown.msg)];
+  int rows = notifRowsFrom(notifScroll), y = NOTIF_TOP;
+  for (int r = 0; r < rows; r++) {
+    const NotifLine& l = notifLines[notifScroll + r];
+    memcpy(buf, (l.part ? notifShown.msg : notifShown.title) + l.start, l.len);
+    buf[l.len] = 0;
+    u8g2.setFont(notifFonts[l.part]);
+    y += notifLineH(notifScroll + r);
+    u8g2.drawUTF8(2, y - 2, buf);
+  }
+  int maxScroll = notifMaxScroll();
+  if (maxScroll > 0) {  // scroll bar on the right edge
+    int track = H - NOTIF_TOP - 1, len = max(4, track * rows / notifLineCount);
+    int y = NOTIF_TOP + 1 + (track - len) * notifScroll / maxScroll;
+    dotLine(W - 1, NOTIF_TOP + 1, W - 1, H - 1);
+    vline(W - 1, y, y + len - 1);
+    vline(W - 2, y, y + len - 1);
+  }
 }
 
 // ---------- Theme picker (SETTINGS) ----------
@@ -3882,6 +4388,11 @@ void loop() {
   bool playing = musicActive(now);
   if (!transitioning && current == SCR_CLOCK && playing) goTo(SCR_MUSIC);   // music started
   if (!transitioning && current == SCR_MUSIC && !playing) goTo(SCR_CLOCK);  // stopped (or phone went away)
+  notifUpdate(now);
+  if (notifInput(steps, btn, now)) {  // the notification on screen takes the knob
+    steps = 0;
+    btn = BTN_NONE;
+  }
   if (!transitioning) handleInput(steps, btn, now);
 
   u8g2.clearBuffer();
@@ -3898,6 +4409,7 @@ void loop() {
   } else {
     drawScreen(current, now);
   }
+  if (notifOpen) drawNotif(now);
   if (tiltWarn) drawTiltWarning(now);
   sendBufferWithImu();
 }
