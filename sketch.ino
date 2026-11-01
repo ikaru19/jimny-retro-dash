@@ -30,9 +30,10 @@
 #include <math.h>
 
 // ---------- Display ----------
-// Wokwi uses SSD1306. If your 1.3" screen turns out to be SH1106, replace this line with:
-// U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);
-U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);
+// The real 1.3" screen is an SH1106. Wokwi only has the SSD1306: for Wokwi, swap the two lines
+// (the picture there is then shifted 2 pixels, which is harmless).
+U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);
+// U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);
 
 const int W = 128;
 const int H = 64;
