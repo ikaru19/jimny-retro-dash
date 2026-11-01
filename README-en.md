@@ -161,7 +161,9 @@ The dash shows up on the iPhone as **JIMNY DASH**. Pair it once in **Settings â†
 no PIN). After that the iPhone reconnects by itself a few seconds after the dash turns on.
 
 - **No extra menu.** While something plays on the iPhone, the idle screen (CLOCK) becomes **MUSIC**:
-  small clock, song time, play/pause icon, title, artist, and a progress bar. The header shows the phone's battery
+  clock, a music visualizer in the theme's style (Clean = bars, Cyberpunk = LED segments with falling peaks,
+  80s = analog L/R VU needles, 3D = wireframe blocks), title, and artist. The visualizer is only for looks (the
+  phone does not send the audio); it sinks flat when paused. The header shows the phone's battery
   (**PHONE 74%**). After a pause it stays 30 seconds (so the knob can resume), then the normal clock comes back.
   Same when the phone disconnects.
 - **Knob:** turn = next / previous song, click = play/pause, hold = menu.

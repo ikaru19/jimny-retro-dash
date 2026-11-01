@@ -3215,6 +3215,84 @@ void drawMusicLine(const char* text, int base, int top, int bottom, int right, u
   u8g2.setMaxClipWindow();
 }
 
+// Music visualizer in the box (x0, y0)-(x1, y1), styled per theme. Not real audio (the phone does not send it):
+// a mix of waves that looks like music. When paused it sinks flat; when playing it rises again.
+//   Clean = plain bars, Cyberpunk = LED segments with falling peaks, 80s = two analog VU needles (L / R),
+//   3D = wireframe blocks with depth.
+const int VIZ_MAX_BARS = 16;
+float vizLevel = 0;  // 0 = flat (paused), 1 = full (playing)
+float vizPeak[VIZ_MAX_BARS], vizVu[2];
+uint32_t vizLast = 0;
+
+// Fake level 0..1 of bar i at time s (seconds)
+float vizBar(int i, float s) {
+  float beat = 0.55f + 0.45f * sinf(s * 7.1f);                      // the whole thing pumps on a "beat"
+  float wave = 0.5f + 0.5f * sinf(s * (3.1f + i * 0.73f) + i * 1.9f);  // each bar has its own speed
+  float fast = 0.5f + 0.5f * sinf(s * (11.3f + i * 1.7f) + i * 0.6f);
+  return vizLevel * (0.15f + 0.85f * (0.6f * wave + 0.4f * fast) * beat);
+}
+
+// One analog VU meter: scale dots on an arc, the last ones bold (the "red" zone), and a needle from below
+void drawVuMeter(int x, int y, int w, int h, float level, const char* label) {
+  frame(x, y, w, h);
+  int cx = x + w / 2, cy = y + h + 6;
+  float r = h + 2;
+  for (int k = 0; k <= 8; k++) {
+    float a = (-45 + k * 11.25f) * DEG_TO_RAD;
+    int sx = cx + lroundf(sinf(a) * r), sy = cy - lroundf(cosf(a) * r);
+    px(sx, sy);
+    if (k >= 7) px(sx, sy + 1);
+  }
+  u8g2.setClipWindow(x + 1, y + 1, x + w - 2, y + h - 2);
+  float a = (-45 + 90 * constrain(level, 0.0f, 1.0f)) * DEG_TO_RAD;
+  line(cx, cy, cx + lroundf(sinf(a) * (r - 1)), cy - lroundf(cosf(a) * (r - 1)));
+  u8g2.setMaxClipWindow();
+  u8g2.setFont(u8g2_font_4x6_tr);
+  u8g2.drawStr(x + 2, y + h - 2, label);
+}
+
+void drawVisualizer(int x0, int y0, int x1, int y1, bool playing, uint32_t now) {
+  float dt = min(0.1f, (now - vizLast) / 1000.0f);
+  vizLast = now;
+  vizLevel += ((playing ? 1.0f : 0.0f) - vizLevel) * min(1.0f, dt * 4);  // smooth rise / fall
+  float s = now / 1000.0f;
+  int h = y1 - y0;
+
+  if (theme == THEME_80S) {  // left / right needles, with a little lag like a real meter
+    int w = (x1 - x0 - 2) / 2;
+    for (int c = 0; c < 2; c++) {
+      float target = 0;
+      for (int i = 0; i < 4; i++) target += vizBar(c * 4 + i, s) / 4;
+      vizVu[c] += (min(1.0f, target * 1.5f) - vizVu[c]) * min(1.0f, dt * 8);
+      drawVuMeter(x0 + c * (w + 2), y0, w, h + 1, vizVu[c], c ? "R" : "L");
+    }
+    return;
+  }
+
+  bool threeD = theme == THEME_3D;
+  int barW = threeD ? 5 : 4, pitch = threeD ? 8 : 6;
+  int depth = threeD ? 3 : 0, bars = min(VIZ_MAX_BARS, (x1 - x0 - depth + pitch - barW) / pitch);
+  for (int i = 0; i < bars; i++) {
+    int bx = x0 + i * pitch;
+    int bh = max(1, (int)lroundf(vizBar(i, s) * (h - depth)));
+    int top = y1 - bh + 1;
+    if (theme == THEME_CYBER) {  // LED segments (2 px on, 1 px off) and a peak that falls slowly
+      for (int y = y1; y >= top; y -= 3) box(bx, max(top, y - 1), barW, min(2, y - top + 1));
+      vizPeak[i] = max(vizPeak[i] - dt * 20, (float)bh);
+      hline(bx, bx + barW - 1, max(y0, y1 - (int)vizPeak[i] - 1));
+    } else if (threeD) {  // front face + top and side seen at an angle
+      frame(bx, top, barW, max(2, bh));
+      line(bx, top, bx + depth, top - depth);
+      line(bx + barW - 1, top, bx + barW - 1 + depth, top - depth);
+      hline(bx + depth, bx + barW - 1 + depth, top - depth);
+      vline(bx + barW - 1 + depth, top - depth, y1 - depth);
+      line(bx + barW - 1, y1, bx + barW - 1 + depth, y1 - depth);
+    } else {
+      box(bx, top, barW, bh);
+    }
+  }
+}
+
 void drawMusic(uint32_t now) {
   Music m;
   portENTER_CRITICAL(&musicMux);
@@ -3225,32 +3303,16 @@ void drawMusic(uint32_t now) {
   else snprintf(bat, sizeof(bat), "%s --%%", tr(T_PHONE));
   drawHeader(bat, m.connected ? "BT" : "--", now);
 
-  // Big clock on the left; song time and play/pause on the right
+  // Clock on the left, a (fake) music visualizer on the right
   char hm[6];
   clockHHMM(hm);
   u8g2.setFont(u8g2_font_logisoso16_tn);
   u8g2.drawStr(2, 30, hm);
-  int px0 = W - 13, py0 = 15;
-  if (m.playing) {
-    for (int i = 0; i <= 10; i++) vline(px0 + i, py0 + i * 6 / 10, py0 + 12 - i * 6 / 10);  // play triangle
-  } else {
-    box(px0, py0, 4, 13);
-    box(px0 + 7, py0, 4, 13);
-  }
-  float el = m.elapsed + (m.playing ? (now - m.infoAt) / 1000.0f * m.rate : 0);
-  if (m.duration > 0) el = min(el, m.duration);
-  char t[16];
-  snprintf(t, sizeof(t), "%d:%02d/%d:%02d", (int)el / 60, (int)el % 60, (int)m.duration / 60, (int)m.duration % 60);
-  u8g2.setFont(u8g2_font_4x6_tr);
-  u8g2.drawStr(px0 - 4 - u8g2.getStrWidth(t), 30, t);
+  drawVisualizer(64, 14, W - 2, 30, m.playing, now);
 
   // Title and artist, 12 px each (room for Japanese, Korean, and Chinese letters)
-  drawMusicLine(m.title[0] ? m.title : "-", 44, 33, 46, W, now);
-  drawMusicLine(m.artist, 56, 46, 58, W, now);
-
-  // Progress bar
-  frame(2, 59, W - 4, 4);
-  if (m.duration > 0) box(3, 60, lroundf((W - 6) * el / m.duration), 2);
+  drawMusicLine(m.title[0] ? m.title : "-", 47, 35, 49, W, now);
+  drawMusicLine(m.artist, 61, 50, 63, W, now);
   burnInShift();
 }
 
