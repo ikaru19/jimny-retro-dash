@@ -2673,8 +2673,8 @@ void drawRace(uint32_t now) {
 struct Music {
   bool connected = false;
   bool playing = false;
-  char title[64] = "";
-  char artist[48] = "";
+  char title[160] = "";  // UTF-8: Japanese/Korean/Chinese letters take 3 bytes each
+  char artist[96] = "";
   float elapsed = 0, duration = 0, rate = 1;  // seconds; rate 1 = normal speed
   uint32_t infoAt = 0;                         // millis() when 'elapsed' was reported
 };
@@ -2682,15 +2682,58 @@ Music music;
 portMUX_TYPE musicMux = portMUX_INITIALIZER_UNLOCKED;
 enum { AMS_PLAY = 0, AMS_PAUSE = 1, AMS_TOGGLE = 2, AMS_NEXT = 3, AMS_PREV = 4, AMS_VOL_UP = 5, AMS_VOL_DOWN = 6 };
 
-// Copy text from the phone, keeping only what our fonts can draw (ASCII); other letters become '?'
+// Copy text from the phone (UTF-8). Control characters become spaces, and a letter cut in half at the end
+// (the phone limits how long one update can be) is dropped.
 void musicCopyText(char* dst, size_t size, const uint8_t* src, size_t len) {
   size_t n = 0;
-  for (size_t i = 0; i < len && n + 1 < size; i++) {
+  for (size_t i = 0; i < len && n + 1 < size;) {
     uint8_t c = src[i];
-    if (c < 0x80) dst[n++] = c >= 32 ? c : ' ';
-    else if ((c & 0xC0) != 0x80) dst[n++] = '?';  // first byte of a multi-byte letter
+    int k = c < 0x80 ? 1 : (c & 0xE0) == 0xC0 ? 2 : (c & 0xF0) == 0xE0 ? 3 : (c & 0xF8) == 0xF0 ? 4 : 0;
+    if (!k) {  // stray byte
+      i++;
+      continue;
+    }
+    if (i + k > len || n + k + 1 > size) break;  // incomplete letter
+    if (k == 1) dst[n++] = c >= 32 ? c : ' ';
+    else
+      for (int j = 0; j < k; j++) dst[n++] = src[i + j];
+    i += k;
   }
   dst[n] = 0;
+}
+
+// Font for a title or artist: one font per text, picked from the letters in it.
+// Hangul -> Korean font, kana -> Japanese font, other Chinese characters -> Chinese font, else Latin (with accents).
+// All are 12 px tall. Emoji and very rare letters are not in these fonts and are left out.
+const uint8_t* musicFont(const char* s) {
+  bool han = false;
+  for (const uint8_t* p = (const uint8_t*)s; *p; p++) {
+    if ((*p & 0xF0) != 0xE0 || !p[1] || !p[2]) continue;
+    uint32_t cp = ((p[0] & 0x0F) << 12) | ((p[1] & 0x3F) << 6) | (p[2] & 0x3F);
+    if (cp >= 0xAC00 && cp <= 0xD7A3) return u8g2_font_gulim12_t_korean2;
+    if (cp >= 0x3040 && cp <= 0x30FF) return u8g2_font_b12_t_japanese3;  // hiragana, katakana
+    if (cp >= 0x4E00 && cp <= 0x9FFF) han = true;
+  }
+  if (!han) return u8g2_font_helvB08_tf;
+  // Only Chinese characters: Japanese titles (e.g. 紅蓮華) use forms the Chinese font lacks, and simplified
+  // Chinese uses forms the Japanese font lacks. Pick whichever font is missing fewer of them.
+  return musicMissing(u8g2_font_b12_t_japanese3, s) < musicMissing(u8g2_font_wqy12_t_gb2312, s) ? u8g2_font_b12_t_japanese3
+                                                                                                  : u8g2_font_wqy12_t_gb2312;
+}
+
+// How many letters of 's' the font cannot draw
+int musicMissing(const uint8_t* font, const char* s) {
+  u8g2.setFont(font);
+  int missing = 0;
+  for (const uint8_t* p = (const uint8_t*)s; *p;) {
+    uint32_t cp = *p;
+    int k = 1;
+    if ((*p & 0xE0) == 0xC0 && p[1]) cp = ((p[0] & 0x1F) << 6) | (p[1] & 0x3F), k = 2;
+    else if ((*p & 0xF0) == 0xE0 && p[1] && p[2]) cp = ((p[0] & 0x0F) << 12) | ((p[1] & 0x3F) << 6) | (p[2] & 0x3F), k = 3;
+    if (cp > ' ' && cp <= 0xFFFF && !u8g2_IsGlyph(u8g2.getU8g2(), cp)) missing++;
+    p += k;
+  }
+  return missing;
 }
 
 #if defined(ESP_PLATFORM)
@@ -2710,7 +2753,7 @@ struct Ams {
   static void onUpdate(BLERemoteCharacteristic* c, uint8_t* d, size_t len, bool isNotify) {
     if (len < 3) return;
     uint8_t entity = d[0], attr = d[1];
-    char buf[64];
+    char buf[sizeof(music.title)];
     musicCopyText(buf, sizeof(buf), d + 3, len - 3);
     portENTER_CRITICAL(&musicMux);
     if (entity == 2 && attr == 0) strlcpy(music.artist, buf, sizeof(music.artist));
@@ -2807,7 +2850,11 @@ void musicCommand(uint8_t cmd) {
 void musicUpdate(uint32_t now) {}
 #else
 // Mac preview: a demo track, so the screen can be designed without a phone
-const char* const DEMO_TRACKS[][2] = { { "Hime Hime Suki Suki Daisuki", "Jimny Dash" }, { "Kira Kirarin", "Ikaru19" } };
+const char* const DEMO_TRACKS[][2] = {
+  { "Hime Hime Suki Suki Daisuki", "Jimny Dash" }, { "紅蓮華", "LiSA" }, { "봄날 (Spring Day)", "방탄소년단" },
+  { "月亮代表我的心", "邓丽君" }, { "Señorita", "Shawn Mendes & Camila Cabello" },
+};
+const int DEMO_COUNT = sizeof(DEMO_TRACKS) / sizeof(DEMO_TRACKS[0]);
 int demoTrack = 0;
 
 void musicBegin() {
@@ -2828,7 +2875,7 @@ void musicCommand(uint8_t cmd) {
   float el = music.elapsed + (music.playing ? (now - music.infoAt) / 1000.0f : 0);
   if (cmd == AMS_TOGGLE) music.playing = !music.playing;
   if (cmd == AMS_NEXT || cmd == AMS_PREV) {
-    demoTrack = (demoTrack + 1) % 2;
+    demoTrack = (demoTrack + (cmd == AMS_NEXT ? 1 : DEMO_COUNT - 1)) % DEMO_COUNT;
     strlcpy(music.title, DEMO_TRACKS[demoTrack][0], sizeof(music.title));
     strlcpy(music.artist, DEMO_TRACKS[demoTrack][1], sizeof(music.artist));
     el = 0;
@@ -2838,6 +2885,20 @@ void musicCommand(uint8_t cmd) {
 }
 #endif
 
+// One line of UTF-8 text in its own font, scrolling slowly when it is wider than the screen
+void drawMusicLine(const char* text, int base, int top, int bottom, int right, uint32_t now) {
+  u8g2.setFont(musicFont(text));
+  int w = u8g2.getUTF8Width(text), x = 2;
+  u8g2.setClipWindow(0, top, right, bottom);
+  if (w > right - 4) {
+    int span = w + 30;
+    x = 2 - (int)((now / 40) % span);
+    u8g2.drawUTF8(x + span, base, text);
+  }
+  u8g2.drawUTF8(x, base, text);
+  u8g2.setMaxClipWindow();
+}
+
 void drawMusic(uint32_t now) {
   Music m;
   portENTER_CRITICAL(&musicMux);
@@ -2845,50 +2906,32 @@ void drawMusic(uint32_t now) {
   portEXIT_CRITICAL(&musicMux);
   drawHeader(tr(T_MUSIC), m.connected ? "BT" : "--", now);
 
-  // Big clock on the left, play/pause symbol on the right
+  // Big clock on the left; song time and play/pause on the right
   char hm[6];
   clockHHMM(hm);
   u8g2.setFont(u8g2_font_logisoso16_tn);
-  u8g2.drawStr(2, 32, hm);
-  int px0 = W - 16, py0 = 18;
+  u8g2.drawStr(2, 30, hm);
+  int px0 = W - 13, py0 = 15;
   if (m.playing) {
     for (int i = 0; i <= 10; i++) vline(px0 + i, py0 + i * 6 / 10, py0 + 12 - i * 6 / 10);  // play triangle
   } else {
     box(px0, py0, 4, 13);
     box(px0 + 7, py0, 4, 13);
   }
-
-  // Title: scrolls slowly when it is wider than the screen
-  u8g2.setFont(u8g2_font_helvB08_tr);
-  const char* title = m.title[0] ? m.title : "-";
-  int tw = u8g2.getStrWidth(title);
-  int tx = 2;
-  if (tw > W - 4) {
-    int span = tw + 30;
-    tx = 2 - (int)((now / 40) % span);
-    u8g2.setClipWindow(0, 34, W, 46);
-    u8g2.drawStr(tx + span, 44, title);
-  }
-  u8g2.setClipWindow(0, 34, W, 46);
-  u8g2.drawStr(tx, 44, title);
-  u8g2.setMaxClipWindow();
-
-  // Artist and time
   float el = m.elapsed + (m.playing ? (now - m.infoAt) / 1000.0f * m.rate : 0);
   if (m.duration > 0) el = min(el, m.duration);
   char t[16];
   snprintf(t, sizeof(t), "%d:%02d/%d:%02d", (int)el / 60, (int)el % 60, (int)m.duration / 60, (int)m.duration % 60);
   u8g2.setFont(u8g2_font_4x6_tr);
-  int timeW = u8g2.getStrWidth(t);
-  u8g2.drawStr(W - 1 - timeW, 54, t);
-  u8g2.setFont(u8g2_font_5x7_tr);
-  u8g2.setClipWindow(0, 46, W - timeW - 4, 56);
-  u8g2.drawStr(2, 54, m.artist);
-  u8g2.setMaxClipWindow();
+  u8g2.drawStr(px0 - 4 - u8g2.getStrWidth(t), 30, t);
+
+  // Title and artist, 12 px each (room for Japanese, Korean, and Chinese letters)
+  drawMusicLine(m.title[0] ? m.title : "-", 44, 33, 46, W, now);
+  drawMusicLine(m.artist, 56, 46, 58, W, now);
 
   // Progress bar
-  frame(2, 58, W - 4, 5);
-  if (m.duration > 0) box(3, 59, lroundf((W - 6) * el / m.duration), 3);
+  frame(2, 59, W - 4, 4);
+  if (m.duration > 0) box(3, 60, lroundf((W - 6) * el / m.duration), 2);
   burnInShift();
 }
 
