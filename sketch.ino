@@ -76,7 +76,7 @@ enum TextId {
   T_SET_CLOCK, T_HOUR, T_MINUTE, T_CLICK_NEXT, T_CLICK_SAVE, T_NO_RTC,
   T_BRIGHTNESS, T_HOLD_CANCEL,
   T_GMETER, T_BRAKE, T_ACCEL, T_TURN, T_NOW, T_TILT_WARN, T_CLICK_VIEW, T_NIGHT, T_OFF,
-  T_4WD, T_ENGAGED, T_RACE, T_OFFROAD, T_ABOUT, T_MUSIC, T_CALL, T_DECLINE, T_ANSWER,
+  T_4WD, T_ENGAGED, T_RACE, T_OFFROAD, T_ABOUT, T_PHONE, T_CALL, T_DECLINE, T_ANSWER,
   T_COUNT
 };
 
@@ -150,7 +150,7 @@ const char* const TEXTS[][LANG_COUNT] = {
   { "BALAP", "RACE" },               // T_RACE
   { "KELUAR JALUR", "OFF ROAD" },    // T_OFFROAD
   { "TENTANG", "ABOUT" },            // T_ABOUT
-  { "MUSIK", "MUSIC" },              // T_MUSIC
+  { "HP", "PHONE" },                 // T_PHONE
   { "PANGGILAN MASUK", "INCOMING CALL" },  // T_CALL
   { "TOLAK", "DECLINE" },            // T_DECLINE
   { "ANGKAT", "ANSWER" },            // T_ANSWER
@@ -2700,6 +2700,7 @@ portMUX_TYPE musicMux = portMUX_INITIALIZER_UNLOCKED;
 // Time read from the iPhone when it connects; the main loop sets the clock (and the RTC, on the I2C bus) with it
 volatile bool phoneTimeReady = false;
 volatile uint8_t phoneH = 0, phoneM = 0, phoneS = 0;
+volatile int phoneBattery = -1;  // iPhone battery in %, -1 = not known yet (shown in the MUSIC header)
 enum { AMS_PLAY = 0, AMS_PAUSE = 1, AMS_TOGGLE = 2, AMS_NEXT = 3, AMS_PREV = 4, AMS_VOL_UP = 5, AMS_VOL_DOWN = 6 };
 const uint32_t MUSIC_KEEP_MS = 30000;  // after a pause, MUSIC stays this long before the plain clock comes back
 uint32_t musicPlayedAt = 0;            // last time something was playing (main loop only)
@@ -3014,6 +3015,10 @@ struct Ams {
     portEXIT_CRITICAL(&musicMux);
   }
 
+  static void onBattery(BLERemoteCharacteristic* c, uint8_t* d, size_t len, bool isNotify) {
+    if (len) phoneBattery = d[0];
+  }
+
   // Runs once per connection (it waits on the radio, so not in the main loop)
   static void setupTask(void*) {
     vTaskDelay(pdMS_TO_TICKS(600));
@@ -3051,6 +3056,15 @@ struct Ams {
           Serial.printf("Clock: time from iPhone %02d:%02d:%02d\n", phoneH, phoneM, phoneS);
         }
       }
+      // Battery Service (0x180F / 0x2A19): one byte, 0-100 %. The iPhone also sends it again when it changes.
+      BLERemoteService* bas = client->getService(BLEUUID((uint16_t)0x180F));
+      BLERemoteCharacteristic* bl = bas ? bas->getCharacteristic(BLEUUID((uint16_t)0x2A19)) : nullptr;
+      if (bl && bl->canRead()) {
+        String v = bl->readValue();
+        if (v.length()) phoneBattery = (uint8_t)v[0];
+        if (bl->canNotify()) bl->registerForNotify(onBattery);
+        Serial.printf("Phone battery: %d%%\n", phoneBattery);
+      }
       if (Ancs::begin(client)) Ancs::run(client);  // stays here until the phone disconnects
     }
     vTaskDelete(nullptr);
@@ -3069,6 +3083,7 @@ class AmsServerCallbacks : public BLEServerCallbacks {
   }
   void onDisconnect(BLEServer* s, esp_ble_gatts_cb_param_t* p) override {
     music.connected = false;
+    phoneBattery = -1;
     Ams::remote = nullptr;
     Serial.println("Music: phone disconnected");
     BLEDevice::startAdvertising();  // ready for the next connection
@@ -3144,6 +3159,7 @@ int demoNotif = 0;
 
 void musicUpdate(uint32_t now) {
   music.connected = now > 1500;  // "pairs" shortly after power-on
+  phoneBattery = music.connected ? 76 : -1;
   if (!music.playing && now > 4000 && now < 5000) {  // starts playing a moment later
     music.playing = true;
     music.infoAt = now;
@@ -3204,7 +3220,10 @@ void drawMusic(uint32_t now) {
   portENTER_CRITICAL(&musicMux);
   m = music;
   portEXIT_CRITICAL(&musicMux);
-  drawHeader(tr(T_MUSIC), m.connected ? "BT" : "--", now);
+  char bat[16];  // header: the phone's battery instead of a screen name
+  if (phoneBattery >= 0) snprintf(bat, sizeof(bat), "%s %d%%", tr(T_PHONE), phoneBattery);
+  else snprintf(bat, sizeof(bat), "%s --%%", tr(T_PHONE));
+  drawHeader(bat, m.connected ? "BT" : "--", now);
 
   // Big clock on the left; song time and play/pause on the right
   char hm[6];
