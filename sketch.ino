@@ -45,7 +45,7 @@ const int PIN_SW = 5;
 const int PIN_BUZZER = 25;  // PASSIVE buzzer (can play different tones), driven through a transistor
 
 // ---------- Data types (must come before all functions so Arduino does not get confused) ----------
-enum Screen { SCR_BOOT, SCR_MENU, SCR_CLOCK, SCR_TILT, SCR_SOON, SCR_THEME, SCR_SETTINGS, SCR_LANG, SCR_SET_CLOCK, SCR_BRIGHT, SCR_GMETER, SCR_NIGHT, SCR_4WD, SCR_RACE, SCR_ABOUT };
+enum Screen { SCR_BOOT, SCR_MENU, SCR_CLOCK, SCR_TILT, SCR_SOON, SCR_THEME, SCR_SETTINGS, SCR_LANG, SCR_SET_CLOCK, SCR_BRIGHT, SCR_GMETER, SCR_NIGHT, SCR_4WD, SCR_RACE, SCR_ABOUT, SCR_MUSIC };
 enum Theme { THEME_CLEAN, THEME_CYBER, THEME_80S, THEME_3D, THEME_COUNT };
 enum ButtonEvent { BTN_NONE, BTN_CLICK, BTN_HOLD };
 enum Lang { LANG_ID, LANG_EN, LANG_COUNT };
@@ -67,7 +67,7 @@ enum TextId {
   T_SET_CLOCK, T_HOUR, T_MINUTE, T_CLICK_NEXT, T_CLICK_SAVE, T_NO_RTC,
   T_BRIGHTNESS, T_HOLD_CANCEL,
   T_GMETER, T_BRAKE, T_ACCEL, T_TURN, T_NOW, T_TILT_WARN, T_CLICK_VIEW, T_NIGHT, T_OFF,
-  T_4WD, T_ENGAGED, T_RACE, T_OFFROAD, T_ABOUT,
+  T_4WD, T_ENGAGED, T_RACE, T_OFFROAD, T_ABOUT, T_MUSIC,
   T_COUNT
 };
 
@@ -141,6 +141,7 @@ const char* const TEXTS[][LANG_COUNT] = {
   { "BALAP", "RACE" },               // T_RACE
   { "KELUAR JALUR", "OFF ROAD" },    // T_OFFROAD
   { "TENTANG", "ABOUT" },            // T_ABOUT
+  { "MUSIK", "MUSIC" },              // T_MUSIC
 };
 static_assert(sizeof(TEXTS) / sizeof(TEXTS[0]) == T_COUNT, "TEXTS table must have 1 row for each TextId");
 
@@ -2662,6 +2663,235 @@ void drawRace(uint32_t now) {
   }
 }
 
+// ---------- MUSIC: iPhone "Now Playing" over Bluetooth LE (Apple Media Service) ----------
+// The dash advertises as "JIMNY DASH". After it is paired once in the iPhone's Bluetooth settings, the iPhone
+// shares what is playing (title, artist, play state, position) and accepts play/pause/next/previous.
+// There is no menu item: while an iPhone is connected, the clock screen becomes this Now Playing screen
+// (big clock on top), and it goes back to the plain clock when the phone disconnects.
+// The music keeps playing where it already plays (phone speaker, car radio); the dash only shows and controls it.
+// In the Mac preview there is no Bluetooth: a demo track plays instead.
+struct Music {
+  bool connected = false;
+  bool playing = false;
+  char title[64] = "";
+  char artist[48] = "";
+  float elapsed = 0, duration = 0, rate = 1;  // seconds; rate 1 = normal speed
+  uint32_t infoAt = 0;                         // millis() when 'elapsed' was reported
+};
+Music music;
+portMUX_TYPE musicMux = portMUX_INITIALIZER_UNLOCKED;
+enum { AMS_PLAY = 0, AMS_PAUSE = 1, AMS_TOGGLE = 2, AMS_NEXT = 3, AMS_PREV = 4, AMS_VOL_UP = 5, AMS_VOL_DOWN = 6 };
+
+// Copy text from the phone, keeping only what our fonts can draw (ASCII); other letters become '?'
+void musicCopyText(char* dst, size_t size, const uint8_t* src, size_t len) {
+  size_t n = 0;
+  for (size_t i = 0; i < len && n + 1 < size; i++) {
+    uint8_t c = src[i];
+    if (c < 0x80) dst[n++] = c >= 32 ? c : ' ';
+    else if ((c & 0xC0) != 0x80) dst[n++] = '?';  // first byte of a multi-byte letter
+  }
+  dst[n] = 0;
+}
+
+#if defined(ESP_PLATFORM)
+#include <BLEDevice.h>
+#include <BLESecurity.h>
+
+// Apple Media Service: the iPhone is the server, the dash reads from it over the same connection
+struct Ams {
+  static constexpr const char* SERVICE = "89D3502B-0F36-433A-8EF4-C502AD55F8DC";
+  static constexpr const char* REMOTE = "9B3C81D8-57B1-4A8A-B8DF-0E56F7CA51C2";  // send play/pause/next
+  static constexpr const char* UPDATE = "2F7CABCE-808D-411F-9A0C-BB92BA96C102";  // subscribe + receive updates
+  static BLERemoteCharacteristic* remote;
+  static BLEClient* client;
+  static uint8_t peer[6];
+
+  // Update = { entity, attribute, flags, value... }. Entity 0 = player, 2 = track.
+  static void onUpdate(BLERemoteCharacteristic* c, uint8_t* d, size_t len, bool isNotify) {
+    if (len < 3) return;
+    uint8_t entity = d[0], attr = d[1];
+    char buf[64];
+    musicCopyText(buf, sizeof(buf), d + 3, len - 3);
+    portENTER_CRITICAL(&musicMux);
+    if (entity == 2 && attr == 0) strlcpy(music.artist, buf, sizeof(music.artist));
+    if (entity == 2 && attr == 2) {
+      strlcpy(music.title, buf, sizeof(music.title));
+      music.elapsed = 0;
+      music.infoAt = millis();
+    }
+    if (entity == 2 && attr == 3) music.duration = atof(buf);
+    if (entity == 0 && attr == 1) {  // playback info: "state,rate,elapsed"; state 1 = playing
+      float st = 0, rate = 0, el = 0;
+      sscanf(buf, "%f,%f,%f", &st, &rate, &el);
+      music.playing = st == 1;
+      music.rate = rate > 0 ? rate : 1;
+      music.elapsed = el;
+      music.infoAt = millis();
+    }
+    portEXIT_CRITICAL(&musicMux);
+  }
+
+  // Runs once per connection (it waits on the radio, so not in the main loop)
+  static void setupTask(void*) {
+    vTaskDelay(pdMS_TO_TICKS(600));
+    client = BLEDevice::createClient();
+    if (client->connect(BLEAddress(peer))) {
+      client->setMTU(185);  // long titles fit in one update
+      BLERemoteService* svc = nullptr;
+      for (int i = 0; i < 10 && !svc; i++) {  // the service shows up once pairing is done
+        svc = client->getService(SERVICE);
+        if (!svc) vTaskDelay(pdMS_TO_TICKS(1000));
+      }
+      BLERemoteCharacteristic* upd = svc ? svc->getCharacteristic(UPDATE) : nullptr;
+      remote = svc ? svc->getCharacteristic(REMOTE) : nullptr;
+      if (upd) {
+        upd->registerForNotify(onUpdate);
+        uint8_t track[] = { 2, 0, 2, 3 };  // track: artist, title, duration
+        uint8_t player[] = { 0, 1 };       // player: playback info
+        upd->writeValue(track, sizeof(track), true);
+        upd->writeValue(player, sizeof(player), true);
+        music.connected = true;
+        Serial.println("Music: iPhone connected");
+      } else {
+        Serial.println("Music: no Apple Media Service (is this an iPhone, and paired?)");
+      }
+    }
+    vTaskDelete(nullptr);
+  }
+};
+BLERemoteCharacteristic* Ams::remote = nullptr;
+BLEClient* Ams::client = nullptr;
+uint8_t Ams::peer[6];
+
+class AmsServerCallbacks : public BLEServerCallbacks {
+  void onConnect(BLEServer* s, esp_ble_gatts_cb_param_t* p) override {
+    memcpy(Ams::peer, p->connect.remote_bda, 6);
+    Serial.println("Music: phone connected, asking for media info...");
+    BLESecurity::startSecurity(p->connect.remote_bda);  // iPhone only shares media info over an encrypted link
+    xTaskCreate(Ams::setupTask, "ams", 6144, nullptr, 1, nullptr);
+  }
+  void onDisconnect(BLEServer* s, esp_ble_gatts_cb_param_t* p) override {
+    music.connected = false;
+    Ams::remote = nullptr;
+    Serial.println("Music: phone disconnected");
+    BLEDevice::startAdvertising();  // ready for the next connection
+  }
+};
+
+void musicBegin() {
+  BLEDevice::init("JIMNY DASH");
+  BLESecurity::setAuthenticationMode(true, false, true);  // bond, no PIN, secure connection
+  BLESecurity::setCapability(ESP_IO_CAP_NONE);           // the iPhone just asks "Pair?"
+  BLESecurity::setInitEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
+  BLESecurity::setRespEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
+  BLEServer* server = BLEDevice::createServer();
+  server->setCallbacks(new AmsServerCallbacks());
+  // Advertise that we want Apple Media Service; that is what makes the dash show up in the iPhone's Bluetooth list
+  BLEAdvertisementData adv, scan;
+  adv.setFlags(0x06);
+  uint8_t solicit[18] = { 17, 0x15, 0xDC, 0xF8, 0x55, 0xAD, 0x02, 0xC5, 0xF4, 0x8E, 0x3A, 0x43, 0x36, 0x0F, 0x2B, 0x50, 0xD3, 0x89 };
+  adv.addData((char*)solicit, sizeof(solicit));
+  adv.setShortName("JIMNY");  // short name in the main packet (31-byte limit), full name in the scan response
+  scan.setName("JIMNY DASH");
+  BLEAdvertising* a = BLEDevice::getAdvertising();
+  a->setAdvertisementData(adv);
+  a->setScanResponseData(scan);
+  BLEDevice::startAdvertising();
+  Serial.printf("Music: Bluetooth ready, advertising as JIMNY DASH (%s)\n", BLEDevice::getAddress().toString().c_str());
+}
+
+void musicCommand(uint8_t cmd) {
+  if (Ams::remote) Ams::remote->writeValue(cmd, true);
+}
+
+void musicUpdate(uint32_t now) {}
+#else
+// Mac preview: a demo track, so the screen can be designed without a phone
+const char* const DEMO_TRACKS[][2] = { { "Hime Hime Suki Suki Daisuki", "Jimny Dash" }, { "Kira Kirarin", "Ikaru19" } };
+int demoTrack = 0;
+
+void musicBegin() {
+  strlcpy(music.title, DEMO_TRACKS[0][0], sizeof(music.title));
+  strlcpy(music.artist, DEMO_TRACKS[0][1], sizeof(music.artist));
+  music.duration = 214;
+  music.elapsed = 37;
+  music.playing = true;
+  music.infoAt = millis();
+}
+
+void musicUpdate(uint32_t now) {
+  music.connected = now > 1500;  // "pairs" shortly after power-on
+}
+
+void musicCommand(uint8_t cmd) {
+  uint32_t now = millis();
+  float el = music.elapsed + (music.playing ? (now - music.infoAt) / 1000.0f : 0);
+  if (cmd == AMS_TOGGLE) music.playing = !music.playing;
+  if (cmd == AMS_NEXT || cmd == AMS_PREV) {
+    demoTrack = (demoTrack + 1) % 2;
+    strlcpy(music.title, DEMO_TRACKS[demoTrack][0], sizeof(music.title));
+    strlcpy(music.artist, DEMO_TRACKS[demoTrack][1], sizeof(music.artist));
+    el = 0;
+  }
+  music.elapsed = el;
+  music.infoAt = now;
+}
+#endif
+
+void drawMusic(uint32_t now) {
+  Music m;
+  portENTER_CRITICAL(&musicMux);
+  m = music;
+  portEXIT_CRITICAL(&musicMux);
+  drawHeader(tr(T_MUSIC), m.connected ? "BT" : "--", now);
+
+  // Big clock on the left, play/pause symbol on the right
+  char hm[6];
+  clockHHMM(hm);
+  u8g2.setFont(u8g2_font_logisoso16_tn);
+  u8g2.drawStr(2, 32, hm);
+  int px0 = W - 16, py0 = 18;
+  if (m.playing) {
+    for (int i = 0; i <= 10; i++) vline(px0 + i, py0 + i * 6 / 10, py0 + 12 - i * 6 / 10);  // play triangle
+  } else {
+    box(px0, py0, 4, 13);
+    box(px0 + 7, py0, 4, 13);
+  }
+
+  // Title: scrolls slowly when it is wider than the screen
+  u8g2.setFont(u8g2_font_helvB08_tr);
+  const char* title = m.title[0] ? m.title : "-";
+  int tw = u8g2.getStrWidth(title);
+  int tx = 2;
+  if (tw > W - 4) {
+    int span = tw + 30;
+    tx = 2 - (int)((now / 40) % span);
+    u8g2.setClipWindow(0, 34, W, 46);
+    u8g2.drawStr(tx + span, 44, title);
+  }
+  u8g2.setClipWindow(0, 34, W, 46);
+  u8g2.drawStr(tx, 44, title);
+  u8g2.setMaxClipWindow();
+
+  // Artist and time
+  float el = m.elapsed + (m.playing ? (now - m.infoAt) / 1000.0f * m.rate : 0);
+  if (m.duration > 0) el = min(el, m.duration);
+  char t[16];
+  snprintf(t, sizeof(t), "%d:%02d/%d:%02d", (int)el / 60, (int)el % 60, (int)m.duration / 60, (int)m.duration % 60);
+  u8g2.setFont(u8g2_font_4x6_tr);
+  int timeW = u8g2.getStrWidth(t);
+  u8g2.drawStr(W - 1 - timeW, 54, t);
+  u8g2.setFont(u8g2_font_5x7_tr);
+  u8g2.setClipWindow(0, 46, W - timeW - 4, 56);
+  u8g2.drawStr(2, 54, m.artist);
+  u8g2.setMaxClipWindow();
+
+  // Progress bar
+  frame(2, 58, W - 4, 5);
+  if (m.duration > 0) box(3, 59, lroundf((W - 6) * el / m.duration), 3);
+  burnInShift();
+}
+
 // ---------- ABOUT (SETTINGS): someone pedalling a bike, "by ikaru19", and a song on loop ----------
 // Knee position for a leg from hip (hx, hy) to foot (fx, fy), thigh and shin both 'len' long, knee pointing forward
 void kneeAt(float hx, float hy, float fx, float fy, float len, float& kx, float& ky) {
@@ -3275,6 +3505,7 @@ void onEnter(Screen s, uint32_t now) {
 
 void goTo(Screen s) {
   if (transitioning) return;
+  if (s == SCR_CLOCK && music.connected) s = SCR_MUSIC;  // phone connected: the clock screen shows what is playing
   nextScreen = s;
   transitioning = true;
   transStart = millis();
@@ -3315,6 +3546,7 @@ void drawScreen(Screen s, uint32_t now) {
     case SCR_4WD: draw4WD(now); break;
     case SCR_RACE: drawRace(now); break;
     case SCR_ABOUT: drawAbout(now); break;
+    case SCR_MUSIC: drawMusic(now); break;
   }
 }
 
@@ -3351,6 +3583,13 @@ void handleInput(int steps, ButtonEvent btn, uint32_t now) {
       // Used while driving: does not switch to the clock on its own
       if (btn == BTN_CLICK) goTo(SCR_MENU);
       else if (steps || btn == BTN_HOLD) resetGMax(now);
+      break;
+    case SCR_MUSIC:
+      // Turn = next / previous track, click = play/pause, hold = back to the menu. Stays on (it shows the clock).
+      if (steps > 0) musicCommand(AMS_NEXT);
+      else if (steps < 0) musicCommand(AMS_PREV);
+      if (btn == BTN_CLICK) musicCommand(AMS_TOGGLE);
+      else if (btn == BTN_HOLD) goTo(SCR_MENU);
       break;
     case SCR_ABOUT:
       if (btn != BTN_NONE) goTo(SCR_SETTINGS);  // the song keeps looping until you leave
@@ -3535,6 +3774,7 @@ void setup() {
 
   loadSettings();
   initClock();
+  musicBegin();
   onEnter(SCR_BOOT, millis());
 }
 
@@ -3554,6 +3794,9 @@ void loop() {
   updateTiltWarning(now);
   updateSound(now);
   updateAutoBrightness();
+  musicUpdate(now);
+  if (!transitioning && current == SCR_CLOCK && music.connected) goTo(SCR_MUSIC);  // phone just connected
+  if (!transitioning && current == SCR_MUSIC && !music.connected) goTo(SCR_CLOCK);  // phone went away
   if (!transitioning) handleInput(steps, btn, now);
 
   u8g2.clearBuffer();

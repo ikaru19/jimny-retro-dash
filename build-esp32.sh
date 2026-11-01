@@ -7,7 +7,7 @@ set -eu
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 SRC="$ROOT/build/esp32-src/sketch"  # arduino-cli wants folder name = .ino file name
 OUT="$ROOT/build/esp32"
-FQBN="esp32:esp32:esp32"
+FQBN="esp32:esp32:esp32:PartitionScheme=huge_app"  # 3 MB for the program (Bluetooth is big), no OTA
 
 mkdir -p "$SRC" "$OUT"
 ln -sf "$ROOT/sketch.ino" "$SRC/sketch.ino"  # symlink, so errors point at the real file
