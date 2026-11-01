@@ -2670,8 +2670,8 @@ void drawRace(uint32_t now) {
 // ---------- MUSIC: iPhone "Now Playing" over Bluetooth LE (Apple Media Service) ----------
 // The dash advertises as "JIMNY DASH". After it is paired once in the iPhone's Bluetooth settings, the iPhone
 // shares what is playing (title, artist, play state, position) and accepts play/pause/next/previous.
-// There is no menu item: while an iPhone is connected, the clock screen becomes this Now Playing screen
-// (big clock on top), and it goes back to the plain clock when the phone disconnects.
+// There is no menu item: while something plays on the iPhone, the clock screen becomes this Now Playing screen
+// (clock on top). After a pause it stays MUSIC_KEEP_MS (so the knob can resume), then goes back to the plain clock.
 // On every connection the dash also takes the time from the iPhone, so the clock is right even without an RTC.
 // The music keeps playing where it already plays (phone speaker, car radio); the dash only shows and controls it.
 // In the Mac preview there is no Bluetooth: a demo track plays instead.
@@ -2689,6 +2689,18 @@ portMUX_TYPE musicMux = portMUX_INITIALIZER_UNLOCKED;
 volatile bool phoneTimeReady = false;
 volatile uint8_t phoneH = 0, phoneM = 0, phoneS = 0;
 enum { AMS_PLAY = 0, AMS_PAUSE = 1, AMS_TOGGLE = 2, AMS_NEXT = 3, AMS_PREV = 4, AMS_VOL_UP = 5, AMS_VOL_DOWN = 6 };
+const uint32_t MUSIC_KEEP_MS = 30000;  // after a pause, MUSIC stays this long before the plain clock comes back
+uint32_t musicPlayedAt = 0;            // last time something was playing (main loop only)
+
+// Show MUSIC instead of the clock? Only while something plays, or shortly after it was paused.
+bool musicActive(uint32_t now) {
+  if (!music.connected) return false;
+  if (music.playing) {
+    musicPlayedAt = now ? now : 1;
+    return true;
+  }
+  return musicPlayedAt && now - musicPlayedAt < MUSIC_KEEP_MS;
+}
 
 // Copy text from the phone (UTF-8). Control characters become spaces, and a letter cut in half at the end
 // (the phone limits how long one update can be) is dropped.
@@ -2888,12 +2900,15 @@ void musicBegin() {
   strlcpy(music.artist, DEMO_TRACKS[0][1], sizeof(music.artist));
   music.duration = 214;
   music.elapsed = 37;
-  music.playing = true;
   music.infoAt = millis();
 }
 
 void musicUpdate(uint32_t now) {
   music.connected = now > 1500;  // "pairs" shortly after power-on
+  if (!music.playing && now > 4000 && now < 5000) {  // starts playing a moment later
+    music.playing = true;
+    music.infoAt = now;
+  }
 }
 
 void musicCommand(uint8_t cmd) {
@@ -3574,7 +3589,7 @@ void onEnter(Screen s, uint32_t now) {
 
 void goTo(Screen s) {
   if (transitioning) return;
-  if (s == SCR_CLOCK && music.connected) s = SCR_MUSIC;  // phone connected: the clock screen shows what is playing
+  if (s == SCR_CLOCK && musicActive(millis())) s = SCR_MUSIC;  // something plays on the phone: the clock shows it
   nextScreen = s;
   transitioning = true;
   transStart = millis();
@@ -3864,8 +3879,9 @@ void loop() {
   updateSound(now);
   updateAutoBrightness();
   musicUpdate(now);
-  if (!transitioning && current == SCR_CLOCK && music.connected) goTo(SCR_MUSIC);  // phone just connected
-  if (!transitioning && current == SCR_MUSIC && !music.connected) goTo(SCR_CLOCK);  // phone went away
+  bool playing = musicActive(now);
+  if (!transitioning && current == SCR_CLOCK && playing) goTo(SCR_MUSIC);   // music started
+  if (!transitioning && current == SCR_MUSIC && !playing) goTo(SCR_CLOCK);  // stopped (or phone went away)
   if (!transitioning) handleInput(steps, btn, now);
 
   u8g2.clearBuffer();
