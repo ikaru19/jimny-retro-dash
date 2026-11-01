@@ -885,10 +885,10 @@ bool rtcRead(uint32_t& secOfDay) {
   return true;
 }
 
-void rtcWrite(int h, int m) {
+void rtcWrite(int h, int m, int s) {
   Wire.beginTransmission(RTC_ADDR);
   Wire.write(0x00);
-  Wire.write(0);               // seconds = 0 (also restarts a halted DS1307 clock)
+  Wire.write(decToBcd(s));     // bit 7 = 0 also restarts a halted DS1307 clock
   Wire.write(decToBcd(m));
   Wire.write(decToBcd(h));     // 24-hour mode
   Wire.endTransmission();
@@ -918,8 +918,12 @@ uint32_t clockSeconds() {
 }
 
 void setClock(int h, int m) {
-  if (rtcOk) rtcWrite(h, m);
-  clockBaseSec = h * 3600UL + m * 60UL;
+  setClockHMS(h, m, 0);
+}
+
+void setClockHMS(int h, int m, int s) {
+  if (rtcOk) rtcWrite(h, m, s);
+  clockBaseSec = h * 3600UL + m * 60UL + s;
   clockBaseMs = millis();
 }
 
@@ -2668,6 +2672,7 @@ void drawRace(uint32_t now) {
 // shares what is playing (title, artist, play state, position) and accepts play/pause/next/previous.
 // There is no menu item: while an iPhone is connected, the clock screen becomes this Now Playing screen
 // (big clock on top), and it goes back to the plain clock when the phone disconnects.
+// On every connection the dash also takes the time from the iPhone, so the clock is right even without an RTC.
 // The music keeps playing where it already plays (phone speaker, car radio); the dash only shows and controls it.
 // In the Mac preview there is no Bluetooth: a demo track plays instead.
 struct Music {
@@ -2680,6 +2685,9 @@ struct Music {
 };
 Music music;
 portMUX_TYPE musicMux = portMUX_INITIALIZER_UNLOCKED;
+// Time read from the iPhone when it connects; the main loop sets the clock (and the RTC, on the I2C bus) with it
+volatile bool phoneTimeReady = false;
+volatile uint8_t phoneH = 0, phoneM = 0, phoneS = 0;
 enum { AMS_PLAY = 0, AMS_PAUSE = 1, AMS_TOGGLE = 2, AMS_NEXT = 3, AMS_PREV = 4, AMS_VOL_UP = 5, AMS_VOL_DOWN = 6 };
 
 // Copy text from the phone (UTF-8). Control characters become spaces, and a letter cut in half at the end
@@ -2798,6 +2806,19 @@ struct Ams {
       } else {
         Serial.println("Music: no Apple Media Service (is this an iPhone, and paired?)");
       }
+      // Current Time Service (0x1805 / 0x2A2B): year, month, day, hours, minutes, seconds, ...
+      BLERemoteService* cts = client->getService(BLEUUID((uint16_t)0x1805));
+      BLERemoteCharacteristic* ct = cts ? cts->getCharacteristic(BLEUUID((uint16_t)0x2A2B)) : nullptr;
+      if (ct && ct->canRead()) {
+        String v = ct->readValue();
+        if (v.length() >= 7 && (uint8_t)v[4] < 24 && (uint8_t)v[5] < 60 && (uint8_t)v[6] < 60) {
+          phoneH = v[4];
+          phoneM = v[5];
+          phoneS = v[6];
+          phoneTimeReady = true;
+          Serial.printf("Clock: time from iPhone %02d:%02d:%02d\n", phoneH, phoneM, phoneS);
+        }
+      }
     }
     vTaskDelete(nullptr);
   }
@@ -2847,7 +2868,12 @@ void musicCommand(uint8_t cmd) {
   if (Ams::remote) Ams::remote->writeValue(cmd, true);
 }
 
-void musicUpdate(uint32_t now) {}
+void musicUpdate(uint32_t now) {
+  if (phoneTimeReady) {  // the iPhone's clock wins over the compile time / RTC
+    phoneTimeReady = false;
+    setClockHMS(phoneH, phoneM, phoneS);
+  }
+}
 #else
 // Mac preview: a demo track, so the screen can be designed without a phone
 const char* const DEMO_TRACKS[][2] = {
