@@ -4,7 +4,7 @@
 
 A digital display for the Suzuki Jimny dashboard, running on an ESP32 with a 128×64 OLED.
 Version v0.4: boot animation, menu, clock, inclinometer (MPU-6050), G-meter, buzzer feedback, and iPhone
-"now playing" over Bluetooth, with 4 themes:
+"now playing", notifications, and calls over Bluetooth, with 4 themes:
 **Clean** (default), **Cyberpunk**, **80s**, and **3D**, and 2 languages: **Indonesian** (default) and **English**.
 Tested in a Mac preview and compiled for the ESP32.
 
@@ -90,7 +90,9 @@ JAM, KEMIRINGAN, SETELAN, and so on.
 | On 4WD | Turn = move the lever (2H / 4H / 4L), click = shift. Click on the current mode or hold = back |
 | On RACE | Turn = steer. Click or hold = back to the menu |
 | During the TILT! warning | Click = go straight to the TILT screen |
-| On MUSIC (iPhone connected) | Turn right = next song, turn left = previous song, click = play/pause, hold = menu |
+| On MUSIC (something plays on the iPhone) | Turn right = next song, turn left = previous song, click = play/pause, hold = menu |
+| On a notification | Turn = scroll by hand (stops the auto scroll), click = close (the next one shows), hold = close all |
+| On an incoming call | Turn = choose DECLINE / ANSWER, click = do it on the phone, hold = hide (the phone keeps ringing) |
 
 In Wokwi: click the small arrows next to the knob to turn it, click the middle of the knob to press,
 and keep the click held to "hold".
@@ -108,7 +110,7 @@ Each screen's style depends on the theme (see **Themes** below). The flow is the
 4. **Idle for 20 seconds** on the menu, a "coming soon" screen, or SETTINGS → switches to **CLOCK** automatically.
    The TILT screen never switches by itself, because it is used while driving.
 5. **CLOCK**: big clock. Turn or click to go back to the menu.
-   While an iPhone is connected over Bluetooth, the clock screen becomes the **MUSIC** screen (see below).
+   While something plays on the iPhone, the clock screen becomes the **MUSIC** screen (see below).
 6. **TILT**: like a factory inclinometer. Left = **side view** (PITCH, front of the car facing left),
    right = **rear view** (ROLL). The Jimny silhouette is taken straight from an SJ410 hardtop blueprint
    (same body as the JA11) and rotated to the angle, on top of ground that tilts with it.
@@ -153,22 +155,33 @@ speed and distance. The track is `TRACK` (list of `{length, curve}`); feel: `RAC
 (1500 Hz, 60 ms). While the tilt warning is shown, a "beep-beep ... beep-beep" alarm keeps sounding until
 the car is safe again. Clicks during a screen transition make no sound (those clicks are ignored).
 
-## Bluetooth: iPhone now playing
+## Bluetooth: iPhone now playing, notifications, calls
 
 The dash shows up on the iPhone as **JIMNY DASH**. Pair it once in **Settings → Bluetooth** (tap "Pair",
 no PIN). After that the iPhone reconnects by itself a few seconds after the dash turns on.
 
-- **No extra menu.** While the iPhone is connected, the idle screen (CLOCK) becomes **MUSIC**:
-  small clock, song time, play/pause icon, title, artist, and a progress bar. When it disconnects, it goes back
-  to the normal clock.
+- **No extra menu.** While something plays on the iPhone, the idle screen (CLOCK) becomes **MUSIC**:
+  small clock, song time, play/pause icon, title, artist, and a progress bar. The header shows the phone's battery
+  (**PHONE 74%**). After a pause it stays 30 seconds (so the knob can resume), then the normal clock comes back.
+  Same when the phone disconnects.
 - **Knob:** turn = next / previous song, click = play/pause, hold = menu.
 - **All letters:** titles and artists show Latin (with accents), Korean, Japanese, and Chinese letters.
   Each line picks its own 12 px font from the letters in it. Long lines scroll. Emoji and very rare letters are left out.
 - **iPhone clock:** each time the iPhone connects, the dash sets its clock (and the RTC, if there is one) from the
   iPhone's time, down to the second. So the clock is right even without an RTC.
-- Uses the Apple Media Service (AMS) and Current Time Service over Bluetooth Low Energy. Sound still plays
+- **Notifications:** every new iPhone notification pops up on top of any screen with a "ding-dong": app name and
+  time on top, then the sender and the text (all letters, like the song titles). A long one scrolls by itself
+  (3 s wait, then one line every 2 s), so it can be read while driving. It closes by itself 20 seconds later.
+  If more arrive, "+1" shows in the corner. Notifications already on the phone when it connects are not shown.
+- **Calls:** the caller's name with **DECLINE / ANSWER** and a ring on the buzzer. The screen closes by itself
+  when the call is answered or ends on the phone.
+- If no notifications show up: on the iPhone, open **Settings → Bluetooth → JIMNY DASH (i)** and turn on
+  **Share System Notifications**.
+- Uses the Apple Media Service (AMS), Apple Notification Center Service (ANCS), Battery Service, and Current Time
+  Service over Bluetooth Low Energy. Sound still plays
   from the phone or the car stereo; the dash only shows and controls it. Android is not supported yet.
-- In the Mac preview, a fake phone "connects" after 1.5 seconds with demo songs in several languages.
+- In the Mac preview, a fake phone "connects" after 1.5 seconds and plays demo songs in several languages,
+  then sends two demo notifications (8 s, 26 s) and a call (40 s).
 
 ## USB remote
 
