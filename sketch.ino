@@ -171,6 +171,26 @@ int takeEncoderSteps() {
   return s;
 }
 
+// USB remote: the Mac (remote.py, or any serial monitor) can send L / R = turn, C = click, H = hold.
+// Handy while the knob is not wired yet or its switch is broken.
+ButtonEvent serialBtn = BTN_NONE;
+
+void pollSerialInput() {
+  while (Serial.available() > 0) {
+    int c = Serial.read();
+    int turn = (c == 'R' || c == 'r') ? 1 : (c == 'L' || c == 'l') ? -1 : 0;
+    if (turn) {
+      portENTER_CRITICAL(&encMux);
+      encSteps += turn;
+      portEXIT_CRITICAL(&encMux);
+    } else if (c == 'C' || c == 'c') {
+      serialBtn = BTN_CLICK;
+    } else if (c == 'H' || c == 'h') {
+      serialBtn = BTN_HOLD;
+    }
+  }
+}
+
 // The button also uses an interrupt, so very fast clicks are still caught
 volatile bool swPressed = false;
 volatile uint32_t swLastMs = 0;
@@ -3520,10 +3540,13 @@ void setup() {
 
 void loop() {
   uint32_t now = millis();
+  pollSerialInput();
   // During a screen transition: knob turns are held (not dropped), but clicks are ignored
   // so a click meant for the old screen does not accidentally open something on the new one
   int steps = transitioning ? 0 : takeEncoderSteps();
   ButtonEvent btn = readButton(now);
+  if (btn == BTN_NONE && serialBtn != BTN_NONE) btn = serialBtn;  // click/hold sent over USB
+  serialBtn = BTN_NONE;
   if (transitioning) btn = BTN_NONE;
   if (btn == BTN_CLICK) playSound(SND(SND_CLICK), false, now);
   else if (btn == BTN_HOLD) playSound(SND(SND_HOLD), false, now);
